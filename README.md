@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/banner.svg" alt="akou-companion: Record on your phone. Your server transcribes." width="100%">
+</p>
+
 <h1 align="center">akou-companion</h1>
 
 <p align="center">
