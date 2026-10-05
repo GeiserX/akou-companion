@@ -18,6 +18,7 @@ public struct OggOpusWriter {
     private var sequence: UInt32 = 0
     private var pending: [Data] = []
     private var packetsEncoded: Int64 = 0
+    private var headers: [Data]?
     private var started = false
     private var finished = false
 
@@ -39,8 +40,11 @@ public struct OggOpusWriter {
         self.vendor = vendor
     }
 
-    /// The OpusHead page (beginning of stream) and the OpusTags page, in that order.
+    /// The OpusHead page (beginning of stream) and the OpusTags page, in that order. Built once:
+    /// every later call returns the same bytes, so a reconnect can resend them without breaking
+    /// the page sequence.
     public mutating func headerPages() throws -> [Data] {
+        if let headers { return headers }
         guard !finished else { throw Failure.alreadyFinished }
         let head = OpusHeaders.head(preSkip: encoder.preSkip48k, inputSampleRate: UInt32(OpusEncoder.sampleRate))
         let tags = OpusHeaders.tags(vendor: vendor)
@@ -49,6 +53,7 @@ public struct OggOpusWriter {
             try page(flags: [], granule: 0, packets: [tags]),
         ]
         started = true
+        headers = pages
         return pages
     }
 

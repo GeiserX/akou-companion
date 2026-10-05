@@ -129,6 +129,17 @@ final class OggOpusWriterTests: XCTestCase {
         XCTAssertTrue((1500...6000).contains(audioBytes), "audio bytes \(audioBytes)")
     }
 
+    func testHeaderPagesAreTheSameBytesEveryCall() throws {
+        var w = OggOpusWriter(encoder: try OpusEncoder(), serial: 9)
+        let first = try w.headerPages()
+        let page = try XCTUnwrap((0..<10).compactMap { try? w.append(frame: Self.sine(frame: $0)) }.first)
+        // A reconnect asks again: same two pages, and the stream's next page keeps sequence 3.
+        XCTAssertEqual(try w.headerPages(), first)
+        XCTAssertEqual(try OggPage.read(page).page.sequence, 2)
+        let next = try XCTUnwrap((10..<20).compactMap { try? w.append(frame: Self.sine(frame: $0)) }.first)
+        XCTAssertEqual(try OggPage.read(next).page.sequence, 3)
+    }
+
     func testAppendBeforeHeadersAndAfterFinishAreRefused() throws {
         var w = OggOpusWriter(encoder: try OpusEncoder())
         XCTAssertThrowsError(try w.append(frame: Self.sine(frame: 0))) { XCTAssertEqual($0 as? OggOpusWriter.Failure, .headersNotWritten) }

@@ -36,7 +36,7 @@ final class LiveClientTests: XCTestCase {
             .words(LiveWords(tokens: [LiveToken(text: " page1", t: 0.2, conf: 0.9)])),
             .words(LiveWords(tokens: [LiveToken(text: " page2", t: 0.4, conf: 0.9)])),
             .words(LiveWords(tokens: [LiveToken(text: " page3", t: 0.6, conf: 0.9)])),
-            .words(LiveWords(tokens: [LiveToken(text: " end", t: 9.9)], final: true)),
+            .words(LiveWords(tokens: [LiveToken(text: " end", t: 9.9, conf: 0.8)])),
             .closed,
             .disconnected(code: 1000),
         ])

@@ -32,7 +32,9 @@ Text frames are JSON control messages, one object with a `type`. Binary frames a
 
 With `codec: "ogg-opus"` every binary frame is exactly one Ogg page. The first two are the OpusHead and OpusTags pages, then audio pages. The Ogg header already carries what the server needs: the page sequence, the stream serial, a CRC32 and the granule position (the audio clock at 48 kHz), so there is no extra header of our own.
 
-With `codec: "pcm16"` binary frames are raw 16 kHz, 16-bit little-endian mono samples. It exists for test clients and for comparing against Opus; the app does not use it.
+With `codec: "pcm16"` binary frames are raw 16 kHz, 16-bit little-endian mono samples, a whole number of samples per frame. It exists for test clients and for comparing against Opus; the app does not use it.
+
+A frame is at most 64 KB. A 200 ms Opus page is about 650 bytes.
 
 ### Audio settings
 
@@ -52,11 +54,11 @@ Server to phone:
 | Message | When |
 |---|---|
 | `{"type":"ready","engine":"nemotron-3.5-560","lang":"auto","tier_ms":560,"load_ms":4210}` | The live stream is open. Only now does the phone send pages. `tier_ms` is how far behind the audio a word can come. |
-| `{"type":"words","tokens":[{"text":" hola","t":1.23,"conf":0.91}],"final":false}` | New tokens, as the engine returns them. A token whose text starts with a space starts a new word. Tokens are append-only: the server never takes one back. |
-| `{"type":"closed"}` | After `stop`, once the last `words` (with `final: true`) went out. The server then closes the socket normally. |
+| `{"type":"words","tokens":[{"text":" hola","t":1.23,"conf":0.91}]}` | New tokens, as the engine returns them. A token whose text starts with a space starts a new word. Tokens are append-only: the server never takes one back. |
+| `{"type":"closed"}` | After `stop`, once the last `words` went out. It marks the end; the server then closes the socket normally. |
 | `{"type":"error","code":"engine_busy","message":"..."}` | Followed by a close with the matching code below. |
 
-`t` is seconds into the recording, on the file's own timeline. The server computes it from the granule of the first page it received in this session, so a session opened after a reconnect still reports times that match the file. The phone sends no timestamps.
+`t` is seconds into the recording, on the file's own timeline. With `ogg-opus` the server computes it from the granule of the first audio page it received in this session, so a session opened after a reconnect still reports times that match the file. The phone sends no timestamps. With `pcm16` there is no granule, so `t` counts from the session's first sample.
 
 The phone pings every 20 seconds.
 
@@ -65,13 +67,18 @@ The phone pings every 20 seconds.
 | Code | `error.code` | Meaning |
 |---|---|---|
 | 1000 | | Normal close after `closed`. |
-| 4400 | `bad_page` | A binary frame that is not a valid Ogg page (bad capture pattern or CRC), or whose stream serial changed. |
+| 4400 | `bad_message` | A control message that is not valid JSON, has an unknown type or field, or comes out of order (audio before `hello`, a second `hello`). |
+| 4400 | `bad_page` | A binary frame that is not a valid Ogg page (bad capture pattern or CRC), belongs to another stream (its serial), skips a page sequence number, or is not mono; a `pcm16` frame that is not whole samples. |
+| 4400 | `unknown_model` | `hello` names a live engine this server does not have. |
+| 4400 | `unsupported_language` | `hello` names a language no live engine on this server hears. |
 | 4401 | `key_revoked` | The key was revoked while the socket was open. |
 | 4409 | `engine_busy` | Another open session uses a different live engine. The server keeps one streaming engine loaded, so all live sessions share one; pin the same model on every phone. |
 | 4500 | `stream_lost` | The live engine stopped during the session. |
 | 4503 | `no_live_engine` | No live engine is on disk, or live text is off on this server. |
 
 ## Reconnecting
+
+Pages within one session must be consecutive: the server closes with 4400 on any gap in page sequence numbers. So a client that falls behind, or drops pages for any reason, never skips ahead on the same socket; it closes it and opens a new session from the current page.
 
 There is no resume. After a drop the phone opens a new socket: `hello`, OpusHead, OpusTags, then pages from where the recording is now. The pages produced while it was offline are not resent; they are in the file. The live view marks the gap ("live text paused, 0:12 to 0:41 will come with the final transcript") and the final pass fills it.
 

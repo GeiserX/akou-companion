@@ -15,7 +15,7 @@ public struct ServerProbe: Sendable {
     private let key: String
     private let session: URLSession
 
-    public init(baseURL: URL, key: String, session: URLSession = .shared) {
+    public init(baseURL: URL, key: String, session: URLSession = AkouSession.shared) {
         self.baseURL = baseURL
         self.key = key
         self.session = session
@@ -34,7 +34,7 @@ public struct ServerProbe: Sendable {
     }
 
     private func get<T: Decodable>(_ path: String) async throws -> T {
-        var req = URLRequest(url: try Endpoint.api(baseURL, path))
+        var req = URLRequest(url: try Endpoint.api(baseURL, path), cachePolicy: .reloadIgnoringLocalCacheData)
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         let (body, response) = try await session.data(for: req)

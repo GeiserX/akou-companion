@@ -43,10 +43,10 @@ public actor LiveClient {
         key: String,
         hello: LiveHello,
         headerPages: [Data],
-        session: URLSession = .shared,
+        session: URLSession = AkouSession.shared,
         pingInterval: Duration = .seconds(20)
     ) async throws -> LiveClient {
-        var req = URLRequest(url: try Endpoint.live(baseURL))
+        var req = URLRequest(url: try Endpoint.live(baseURL), cachePolicy: .reloadIgnoringLocalCacheData)
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         let task = session.webSocketTask(with: req)
         task.resume()
@@ -91,12 +91,14 @@ public actor LiveClient {
         (events, continuation) = AsyncStream.makeStream(of: Event.self, bufferingPolicy: .unbounded)
     }
 
-    /// Sends one audio frame: one Ogg page for `ogg-opus`, raw samples for `pcm16`.
+    /// Sends one audio frame: one Ogg page for `ogg-opus`, raw samples for `pcm16`. Pages within a
+    /// session must be consecutive (the server closes 4400 on a gap), so a caller that falls behind
+    /// does not skip pages: it cancels and opens a new session from the current page.
     public func send(page: Data) async throws {
         try await task.send(.data(page))
     }
 
-    /// Ends the recording: the server sends the last words with `final: true`, then `closed`.
+    /// Ends the recording: the server sends the last words, then `closed`.
     public func stop() async throws {
         try await task.send(.string(LiveClientMessage.stop.json()))
     }

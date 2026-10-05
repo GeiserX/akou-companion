@@ -4,7 +4,8 @@ import Network
 
 /// A local stand-in for akou's `GET /v1/live`, on Network.framework's WebSocket server: it checks
 /// the bearer on the upgrade, answers `hello` with `ready`, echoes one token per binary frame and
-/// answers `stop` with the final words, `closed` and a normal close.
+/// answers `stop` with the last words, `closed` and a normal close. Every frame has exactly the
+/// fields akou's server sends (src/main/server/live.ts), no more.
 final class FakeLiveServer: @unchecked Sendable {
     enum Behaviour {
         case normal
@@ -100,7 +101,7 @@ final class FakeLiveServer: @unchecked Sendable {
             send(#"{"type":"error","code":"engine_busy","message":"another session uses another engine"}"#, on: conn)
             close(conn, code: 4409)
         case ("stop", _):
-            send(#"{"type":"words","tokens":[{"text":" end","t":9.9}],"final":true}"#, on: conn)
+            send(#"{"type":"words","tokens":[{"text":" end","t":9.9,"conf":0.8}]}"#, on: conn)
             send(#"{"type":"closed"}"#, on: conn)
             close(conn, code: 1000)
         default:
@@ -115,7 +116,7 @@ final class FakeLiveServer: @unchecked Sendable {
         }
         // The first two binary frames are the OpusHead and OpusTags pages: no words for them.
         guard n > 2 else { return }
-        send(#"{"type":"words","tokens":[{"text":" page\#(n - 2)","t":\#(Double(n - 2) / 5),"conf":0.9}],"final":false}"#, on: conn)
+        send(#"{"type":"words","tokens":[{"text":" page\#(n - 2)","t":\#(Double(n - 2) / 5),"conf":0.9}]}"#, on: conn)
     }
 
     private func send(_ text: String, on conn: NWConnection) {

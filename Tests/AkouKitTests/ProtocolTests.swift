@@ -26,13 +26,26 @@ final class ProtocolTests: XCTestCase {
         }
     }
 
+    /// The frames exactly as akou's server builds them (src/main/server/live.ts): `words` carries
+    /// only `type` and `tokens`, `ready` may carry a null `tier_ms`.
+    func testTheServersLiteralFramesParse() throws {
+        XCTAssertEqual(
+            try LiveServerMessage.parse(#"{"type":"words","tokens":[{"text":" hola","t":1.23,"conf":0.91}]}"#),
+            .words(LiveWords(tokens: [LiveToken(text: " hola", t: 1.23, conf: 0.91)]))
+        )
+        XCTAssertEqual(
+            try LiveServerMessage.parse(#"{"type":"ready","engine":"nemotron-3.5-560","lang":"auto","tier_ms":null,"load_ms":12}"#),
+            .ready(LiveReady(engine: "nemotron-3.5-560", lang: "auto", tierMs: nil, loadMs: 12))
+        )
+    }
+
     func testServerMessagesParse() throws {
         XCTAssertEqual(
             try LiveServerMessage.parse(#"{"type":"ready","engine":"nemotron-3.5-560","lang":"auto","tier_ms":560,"load_ms":4210}"#),
             .ready(LiveReady(engine: "nemotron-3.5-560", lang: "auto", tierMs: 560, loadMs: 4210))
         )
         XCTAssertEqual(
-            try LiveServerMessage.parse(#"{"type":"words","tokens":[{"text":" hola","t":1.23,"conf":0.91},{"text":"s","t":1.4}],"final":false}"#),
+            try LiveServerMessage.parse(#"{"type":"words","tokens":[{"text":" hola","t":1.23,"conf":0.91},{"text":"s","t":1.4}]}"#),
             .words(LiveWords(tokens: [LiveToken(text: " hola", t: 1.23, conf: 0.91), LiveToken(text: "s", t: 1.4)]))
         )
         XCTAssertEqual(try LiveServerMessage.parse(#"{"type":"closed"}"#), .closed)
@@ -48,7 +61,7 @@ final class ProtocolTests: XCTestCase {
     func testServerMessagesRoundTrip() throws {
         let all: [LiveServerMessage] = [
             .ready(LiveReady(engine: "e", lang: "es", tierMs: 1120, loadMs: 1)),
-            .words(LiveWords(tokens: [LiveToken(text: " a", t: 0.5, conf: nil)], final: true)),
+            .words(LiveWords(tokens: [LiveToken(text: " a", t: 0.5, conf: nil)])),
             .closed,
             .error(LiveError(code: "bad_page", message: nil)),
         ]

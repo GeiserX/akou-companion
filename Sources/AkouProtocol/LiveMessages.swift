@@ -32,7 +32,7 @@ public struct LiveHello: Codable, Sendable, Equatable {
 /// Messages the phone sends as text frames.
 public enum LiveClientMessage: Sendable, Equatable {
     case hello(LiveHello)
-    /// The recording stopped: the server flushes the tail words, sends `closed` and closes.
+    /// The recording stopped: the server sends the last words, then `closed`, and closes.
     case stop
 }
 
@@ -74,15 +74,13 @@ public struct LiveToken: Codable, Sendable, Equatable {
     }
 }
 
-/// Append-only tokens: the server never takes one back.
+/// Append-only tokens: the server never takes one back. The end of a session is `closed`, not a
+/// flag on the last `words`.
 public struct LiveWords: Codable, Sendable, Equatable {
     public var tokens: [LiveToken]
-    /// True on the tail flushed after `stop`.
-    public var final: Bool
 
-    public init(tokens: [LiveToken], final: Bool = false) {
+    public init(tokens: [LiveToken]) {
         self.tokens = tokens
-        self.final = final
     }
 }
 
@@ -110,7 +108,9 @@ public enum LiveServerMessage: Sendable, Equatable {
 
 /// WebSocket close codes the live route uses besides the standard ones.
 public enum LiveCloseCode: Int, Sendable, Equatable, CaseIterable {
-    /// A binary frame that is not a valid Ogg page, or whose stream serial changed.
+    /// A message or frame the server refused: `bad_message` (malformed or out-of-order control
+    /// message), `bad_page` (not a valid Ogg page, another stream's serial, or a gap in page
+    /// sequence numbers), `unknown_model` or `unsupported_language`. The `error` frame says which.
     case badPage = 4400
     /// The key was revoked while the socket was open.
     case keyRevoked = 4401
