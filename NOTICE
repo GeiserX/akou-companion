@@ -1,0 +1,26 @@
+akou-companion
+Copyright (C) 2026 The akou-companion authors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version (SPDX: GPL-3.0-or-later). The full text is in the file LICENSE.
+
+Additional permission under GNU GPL version 3 section 7
+
+As an additional permission under section 7 of the GNU General Public License,
+version 3, you may convey this program, or a covered work based on it, through
+Apple's App Store, TestFlight, or any other distribution service operated by
+Apple, even though the terms of those services (their usage rules, digital
+rights management, device limits and limits on further distribution) impose
+restrictions on recipients that the GPL would otherwise not allow.
+
+This permission does not remove any other condition of the GPL. In particular,
+everyone who receives the program through such a service must still be able to
+get the Corresponding Source under the terms of the GPL, for example from a
+public source repository named in the app's description or its about screen.
+
+When you convey a modified version, you may remove this additional permission
+from your version, as section 7 allows; the work is then under the plain
+GPL-3.0-or-later. Contributions to this repository are accepted under the same
+terms, including this permission.
