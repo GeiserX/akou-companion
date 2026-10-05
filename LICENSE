@@ -1,9 +1,3 @@
-akou-companion is free software: you can redistribute it and/or modify it under
-the terms of the GNU General Public License as published by the Free Software
-Foundation, either version 3 of the License, or (at your option) any later
-version, with the additional permission under section 7 written in the file
-NOTICE (distribution through Apple's App Store and TestFlight).
-
                     GNU GENERAL PUBLIC LICENSE
                        Version 3, 29 June 2007
 
@@ -679,3 +673,5 @@ the library.  If this is what you want to do, use the GNU Lesser General
 Public License instead of this License.  But first, please read
 <https://www.gnu.org/licenses/why-not-lgpl.html>.
 
+
+Additional permission under section 7: see the file NOTICE.
