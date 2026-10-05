@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/banner.svg" alt="akou-companion" width="100%">
+</p>
+
 <h1 align="center">akou-companion</h1>
 
 <p align="center">
