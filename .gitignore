@@ -1,0 +1,17 @@
+.DS_Store
+.build/
+.swiftpm/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+App/Config/Local.xcconfig
+.beads/issues.jsonl
+.beads/interactions.jsonl
+.beads/events.jsonl
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/

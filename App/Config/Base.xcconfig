@@ -1,0 +1,14 @@
+// Shared by every target.
+//
+// No signing team is committed. To build for a device, create Config/Local.xcconfig (gitignored)
+// with one line: DEVELOPMENT_TEAM = <your team id>
+IPHONEOS_DEPLOYMENT_TARGET = 18.0
+TARGETED_DEVICE_FAMILY = 1
+SWIFT_VERSION = 6.0
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+CODE_SIGN_STYLE = Automatic
+DEVELOPMENT_TEAM =
+BUNDLE_ID_BASE = io.github.geiserx.akou-companion
+
+#include? "Local.xcconfig"

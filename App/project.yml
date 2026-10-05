@@ -1,0 +1,42 @@
+# XcodeGen spec: `xcodegen generate --spec App/project.yml` writes App/AkouCompanion.xcodeproj,
+# which is generated and never committed. Settings live in Config/*.xcconfig.
+name: AkouCompanion
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "18.0"
+packages:
+  AkouKit:
+    path: ..
+targets:
+  AkouCompanion:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+      - Shared
+    configFiles:
+      Debug: Config/App.xcconfig
+      Release: Config/App.xcconfig
+    dependencies:
+      - package: AkouKit
+        product: AkouKit
+      - target: AkouCompanionWidgets
+        embed: true
+  # The Live Activity and, from milestone M2, the record control for the Action button, the Lock
+  # Screen and Control Center. A stub for now: it shows a recording's state and elapsed time.
+  AkouCompanionWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Widgets
+      - Shared
+    configFiles:
+      Debug: Config/Widgets.xcconfig
+      Release: Config/Widgets.xcconfig
+schemes:
+  AkouCompanion:
+    build:
+      targets:
+        AkouCompanion: all
+        AkouCompanionWidgets: all
