@@ -6,7 +6,8 @@ import Foundation
 /// recording file and, while connected, sent as one binary WebSocket message.
 ///
 /// Granule positions follow RFC 7845: the 48 kHz sample count at the end of the page's last packet,
-/// pre-skip included. The server reads the clock from them, so the phone sends no timestamps.
+/// pre-skip included; the last page's is trimmed to where the input ended. The server reads the
+/// clock from them, so the phone sends no timestamps.
 public struct OggOpusWriter {
     public static let defaultPacketsPerPage = 10
 
@@ -61,11 +62,22 @@ public struct OggOpusWriter {
         return try flush(flags: [])
     }
 
-    /// Writes the last page, marked end of stream, with whatever packets are still pending (possibly none).
+    /// Writes the last page, marked end of stream, with whatever packets are still pending.
+    ///
+    /// The encoder holds back its lookahead, so one frame of silence goes in after the audio to push
+    /// the last real samples out; the page's granule then ends the stream exactly where the input
+    /// ended (pre-skip plus the input's samples), which trims that padding again (RFC 7845 4.4).
     public mutating func finish() throws -> Data {
         guard started else { throw Failure.headersNotWritten }
         guard !finished else { throw Failure.alreadyFinished }
-        let last = try flush(flags: .endOfStream)
+        let inputPackets = packetsEncoded
+        var granule: Int64 = 0
+        if inputPackets > 0 {
+            pending.append(try encoder.encode([Float](repeating: 0, count: OpusEncoder.frameSamples)))
+            granule = Int64(encoder.preSkip48k) + inputPackets * OpusEncoder.frameSamples48k
+        }
+        let last = try page(flags: .endOfStream, granule: granule, packets: pending)
+        pending.removeAll()
         finished = true
         return last
     }

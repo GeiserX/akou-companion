@@ -52,6 +52,16 @@ final class OggTests: XCTestCase {
         }
     }
 
+    func testReadingFromASliceThatDoesNotStartAtZero() throws {
+        let file = try ffmpegFile()
+        let (_, first) = try OggPage.read(file)
+        let slice = file[first...]
+        XCTAssertNotEqual(slice.startIndex, 0)
+        let (page, _) = try OggPage.read(slice)
+        XCTAssertEqual(page.sequence, 1)
+        XCTAssertTrue(page.packets[0].starts(with: Data("OpusTags".utf8)))
+    }
+
     func testNotAnOggPage() {
         XCTAssertThrowsError(try OggPage.read(Data(repeating: 0x41, count: 64))) { error in
             XCTAssertEqual(error as? OggPage.Error, .notAnOggPage)
@@ -100,7 +110,8 @@ final class OggOpusWriterTests: XCTestCase {
     func testWriterProducesAWellFormedStream() throws {
         let (file, encoder) = try Self.writeOneSecond()
         let pages = try OggPage.readAll(file)
-        // OpusHead, OpusTags, 5 pages of 10 packets, then an empty end-of-stream page.
+        // OpusHead, OpusTags, 5 pages of 10 packets, then the end-of-stream page holding the one
+        // frame of silence that flushes the encoder's lookahead.
         XCTAssertEqual(pages.count, 8)
         XCTAssertEqual(Set(pages.map(\.serial)), [0x1234_5678])
         XCTAssertEqual(pages.map(\.sequence), Array(0..<8))
@@ -110,8 +121,9 @@ final class OggOpusWriterTests: XCTestCase {
         XCTAssertEqual(pages[2...6].map(\.granulePosition), [9600, 19200, 28800, 38400, 48000])
         XCTAssertEqual(pages[2...6].map(\.packets.count), [10, 10, 10, 10, 10])
         XCTAssertEqual(pages[7].flags, .endOfStream)
-        XCTAssertEqual(pages[7].packets.count, 0)
-        XCTAssertEqual(pages[7].granulePosition, 48000)
+        XCTAssertEqual(pages[7].packets.count, 1)
+        // Trimmed to the input: pre-skip plus exactly one second.
+        XCTAssertEqual(pages[7].granulePosition, Int64(encoder.preSkip48k) + 48000)
         // About 24 kbit/s: 60 bytes per 20 ms packet, with room for VBR.
         let audioBytes = pages[2...6].flatMap(\.packets).reduce(0) { $0 + $1.count }
         XCTAssertTrue((1500...6000).contains(audioBytes), "audio bytes \(audioBytes)")
@@ -132,6 +144,21 @@ final class OggOpusWriterTests: XCTestCase {
             .first { FileManager.default.isExecutableFile(atPath: $0) }
         guard let ffprobe else { throw XCTSkip("ffprobe not installed") }
         let (file, _) = try Self.writeOneSecond()
+        let ours = try probe(ffprobe, file)
+        XCTAssertTrue(ours.contains("codec_name=opus"), ours)
+        XCTAssertTrue(ours.contains("channels=1"), ours)
+        // ffprobe reports the last granule over 48 kHz. One second through our writer must end
+        // exactly where one second through ffmpeg's own encoder and muxer ends (the fixture).
+        let reference = try probe(ffprobe, try OggTests().ffmpegFile())
+        XCTAssertEqual(duration(ours), duration(reference))
+        XCTAssertNotNil(duration(ours))
+    }
+
+    private func duration(_ text: String) -> Double? {
+        text.split(separator: "\n").first { $0.hasPrefix("duration=") }.flatMap { Double($0.dropFirst(9)) }
+    }
+
+    private func probe(_ ffprobe: String, _ file: Data) throws -> String {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("akou-writer-\(UUID().uuidString).opus")
         try file.write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
@@ -142,12 +169,7 @@ final class OggOpusWriterTests: XCTestCase {
         p.standardOutput = out
         try p.run()
         p.waitUntilExit()
-        let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         XCTAssertEqual(p.terminationStatus, 0)
-        XCTAssertTrue(text.contains("codec_name=opus"), text)
-        XCTAssertTrue(text.contains("channels=1"), text)
-        let duration = text.split(separator: "\n").first { $0.hasPrefix("duration=") }.flatMap { Double($0.dropFirst(9)) }
-        // 48000 granule minus the pre-skip: just under one second.
-        XCTAssertEqual(try XCTUnwrap(duration), 1.0, accuracy: 0.02)
+        return String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
     }
 }

@@ -104,7 +104,8 @@ public struct OggPage: Equatable, Sendable {
         if let last = table.last, last == 255 { throw Error.continuedPacket }
 
         var zeroed = Data(data[base..<(base + length)])
-        zeroed.replaceSubrange(22..<26, with: [0, 0, 0, 0])
+        let crcField = zeroed.startIndex + 22
+        zeroed.replaceSubrange(crcField..<(crcField + 4), with: [0, 0, 0, 0])
         let actual = OggCRC.checksum(zeroed)
         guard actual == stored else { throw Error.badChecksum(expected: stored, actual: actual) }
 

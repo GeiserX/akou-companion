@@ -72,8 +72,13 @@ public actor LiveClient {
             throw Failure.closedBeforeReady(closeCode: closeCode(task))
         }
 
-        for page in headerPages {
-            try await task.send(.data(page))
+        do {
+            for page in headerPages {
+                try await task.send(.data(page))
+            }
+        } catch {
+            task.cancel()
+            throw error
         }
         let client = LiveClient(task: task, ready: ready)
         await client.start(pingInterval: pingInterval)

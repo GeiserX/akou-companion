@@ -51,7 +51,7 @@ The server's Keys page shows a QR code with the URL and a new key, and the app s
 ## Decisions
 
 - **The phone's file is the recording of record.** The live socket is for text only and can drop at any time without losing audio.
-- **No resume on the socket.** A reconnect is a new session; the final pass fills the gap. If gaps turn out long and frequent, the fix is on the phone (resend the last few pages), with no protocol change.
+- **No resume on the socket.** A reconnect is a new session that starts at the recording's current position, and the final pass fills the gap. Replaying missed pages is not part of the protocol; if gaps turn out long and frequent in M1, that is a protocol change to design then.
 - **Opus in Ogg, made on the phone.** libopus through a pinned Swift package; the pages are the same bytes in the file and on the wire.
 - **One live engine per server.** akou loads one streaming engine at a time, so phones on one server share it.
 - **License.** GPL-3.0-or-later, with an additional permission under section 7 for distribution through Apple's App Store and TestFlight ([NOTICE](../NOTICE)).
