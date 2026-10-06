@@ -110,7 +110,8 @@ public enum LiveServerMessage: Sendable, Equatable {
 public enum LiveCloseCode: Int, Sendable, Equatable, CaseIterable {
     /// A message or frame the server refused: `bad_message` (malformed or out-of-order control
     /// message), `bad_page` (not a valid Ogg page, another stream's serial, or a gap in page
-    /// sequence numbers), `unknown_model` or `unsupported_language`. The `error` frame says which.
+    /// sequence numbers), `too_fast` (more than 30 s of audio waiting for the engine),
+    /// `unknown_model` or `unsupported_language`. The `error` frame says which.
     case badPage = 4400
     /// The key was revoked while the socket was open.
     case keyRevoked = 4401

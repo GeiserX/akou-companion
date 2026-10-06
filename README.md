@@ -19,7 +19,7 @@ Status: early. This repository holds AkouKit (the tested core) and the app skele
 
 What is built today, in AkouKit:
 
-- Opus encoding through libopus at 16 kHz mono, 24 kbit/s, 20 ms frames: about 13 MB per hour
+- Opus encoding through libopus at 16 kHz mono, 24 kbit/s, 20 ms frames: about 11 MB per hour
 - Ogg pages of 200 ms that are byte-identical to ffmpeg's muxer, checked against an ffmpeg-made file
 - A live client for akou's `GET /v1/live`: one WebSocket, Ogg pages up, words down
 - A server probe for the settings screen: is it akou, does the key work, can it show live text
