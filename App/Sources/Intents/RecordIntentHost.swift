@@ -12,7 +12,8 @@ enum RecordIntentHost {
     static func start(title: String?) async throws {
         guard let recorder else { throw RecordIntentError.recorderUnavailable }
         do {
-            try await RecordIntentGate.start(recorder, title: title, onStatus: RecordingStatus.set(recording:))
+            // The workspace the settings give new recordings, as the record screen starts on.
+            try await RecordIntentGate.start(recorder, title: title, workspace: ServerSettings.workspace, onStatus: RecordingStatus.set(recording:))
         } catch RecordIntentGateError.resumeFailed {
             throw RecordIntentError.resumeFailed
         }

@@ -1,6 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import AVFoundation
 
+/// What the recorder takes samples from: 16 kHz mono Float, handed to the sink it was made with.
+/// The microphone (`AudioCapture`) in the app; a file in the app's tests.
+@MainActor
+protocol SampleSource: AnyObject {
+    var onInterruption: ((_ began: Bool, _ shouldResume: Bool) -> Void)? { get set }
+    func start() throws
+    func pause()
+    func resume() throws
+    func stop()
+}
+
 /// The microphone: an `AVAudioEngine` input tap converted to 16 kHz mono Float, handed to `sink`
 /// on the audio thread.
 ///
@@ -10,7 +21,7 @@ import AVFoundation
 /// the same file. A route change (headphones in or out, a Bluetooth headset) restarts the tap on
 /// the new input without stopping the recording.
 @MainActor
-final class AudioCapture {
+final class AudioCapture: SampleSource {
     enum Failure: Error {
         case noInput
     }

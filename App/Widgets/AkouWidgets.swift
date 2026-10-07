@@ -101,6 +101,8 @@ private struct LastLine: View {
             Text(state.lastLine)
         } else if state.paused {
             Text("Tap to continue in akou.").foregroundStyle(.secondary)
+        } else if !state.liveText {
+            Text("No live text. The full transcript comes when you stop.").foregroundStyle(.secondary)
         } else {
             Text("Waiting for live text. The full transcript comes when you stop.").foregroundStyle(.secondary)
         }

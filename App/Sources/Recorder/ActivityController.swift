@@ -10,14 +10,16 @@ final class ActivityController {
     static let lineInterval: Duration = .seconds(5)
 
     private var activity: Activity<RecordingAttributes>?
-    private var content = RecordingAttributes.ContentState(startedAt: .now, paused: false, lastLine: "")
+    /// Internal so the app tests can read what the Live Activity shows.
+    private(set) var content = RecordingAttributes.ContentState(startedAt: .now, paused: false, lastLine: "", liveText: false)
     private var lastPush: ContinuousClock.Instant?
     private var pendingLine: Task<Void, Never>?
 
-    func start(title: String, startedAt: Date) {
+    /// `liveText` false: this recording has no live text (no server, no key, or none on the server).
+    func start(title: String, startedAt: Date, liveText: Bool) {
         end()
+        content = .init(startedAt: startedAt, paused: false, lastLine: "", liveText: liveText)
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        content = .init(startedAt: startedAt, paused: false, lastLine: "")
         activity = try? Activity.request(
             attributes: RecordingAttributes(title: title),
             content: .init(state: content, staleDate: nil)
@@ -42,6 +44,13 @@ final class ActivityController {
             guard !Task.isCancelled else { return }
             self?.push()
         }
+    }
+
+    /// Live text ended for this recording (a refusal, or a server without it); the lines so far stay.
+    func setLiveText(_ on: Bool) {
+        guard on != content.liveText else { return }
+        content.liveText = on
+        push()
     }
 
     func end() {

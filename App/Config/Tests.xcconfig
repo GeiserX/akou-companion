@@ -1,0 +1,5 @@
+#include "Base.xcconfig"
+
+PRODUCT_NAME = AkouCompanionTests
+PRODUCT_BUNDLE_IDENTIFIER = $(BUNDLE_ID_BASE).tests
+GENERATE_INFOPLIST_FILE = YES

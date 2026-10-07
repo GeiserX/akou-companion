@@ -12,12 +12,14 @@ private final class FakeRecorder: RecordIntentRecorder {
     var refuseStart = false
     var refuseResume = false
     private(set) var calls: [String] = []
+    private(set) var startedIn: String?
 
     var isRecording: Bool { state != .idle }
     var isPaused: Bool { state == .paused }
 
     func start(workspace: String?, title: String?) async throws {
         calls.append("start(\(title ?? "nil"))")
+        startedIn = workspace
         if refuseStart { throw Refused() }
         state = .recording
     }
@@ -48,6 +50,15 @@ final class RecordIntentGateTests: XCTestCase {
         try await RecordIntentGate.start(r, title: "Standup", onStatus: note)
         XCTAssertEqual(r.calls, ["start(Standup)"])
         XCTAssertEqual(statuses, [true])
+    }
+
+    func testStartsInTheWorkspaceItIsGiven() async throws {
+        let r = FakeRecorder()
+        try await RecordIntentGate.start(r, title: nil, workspace: "home", onStatus: note)
+        XCTAssertEqual(r.startedIn, "home")
+        let none = FakeRecorder()
+        try await RecordIntentGate.start(none, title: nil, onStatus: note)
+        XCTAssertNil(none.startedIn)
     }
 
     func testDoesNotStartASecondRecording() async throws {

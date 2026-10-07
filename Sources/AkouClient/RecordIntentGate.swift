@@ -26,15 +26,15 @@ public enum RecordIntentGateError: Error, Equatable {
 /// call is over, failed or not, so the control never shows a state the recorder is not in.
 @MainActor
 public enum RecordIntentGate {
-    /// Resumes a paused recording, starts one when none is running, and does nothing otherwise.
-    /// Throws `resumeFailed` when the recording is still paused after `resume()`.
-    public static func start(_ recorder: any RecordIntentRecorder, title: String?, onStatus: (Bool) -> Void) async throws {
+    /// Resumes a paused recording, starts one in `workspace` when none is running, and does nothing
+    /// otherwise. Throws `resumeFailed` when the recording is still paused after `resume()`.
+    public static func start(_ recorder: any RecordIntentRecorder, title: String?, workspace: String? = nil, onStatus: (Bool) -> Void) async throws {
         defer { onStatus(recorder.isRecording) }
         if recorder.isPaused {
             recorder.resume()
             if recorder.isPaused { throw RecordIntentGateError.resumeFailed }
         } else if !recorder.isRecording {
-            try await recorder.start(workspace: nil, title: title)
+            try await recorder.start(workspace: workspace, title: title)
         }
     }
 

@@ -38,9 +38,32 @@ targets:
     dependencies:
       - package: AkouKit
         product: AkouKit
+  # The seams between the recorder, the intents, the uploader, the Library and the widgets, run in
+  # the iOS Simulator inside the app. EndToEndTests runs only when given a server (see its header).
+  AkouCompanionTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests
+    configFiles:
+      Debug: Config/Tests.xcconfig
+      Release: Config/Tests.xcconfig
+    settings:
+      # The app's product is akou.app (PRODUCT_NAME), not the target's name.
+      TEST_HOST: $(BUILT_PRODUCTS_DIR)/akou.app/akou
+      BUNDLE_LOADER: $(TEST_HOST)
+    dependencies:
+      - target: AkouCompanion
+      # Imported, not linked: the app the tests run in already carries AkouKit.
+      - package: AkouKit
+        product: AkouKit
+        link: false
 schemes:
   AkouCompanion:
     build:
       targets:
         AkouCompanion: all
         AkouCompanionWidgets: all
+    test:
+      targets:
+        - AkouCompanionTests

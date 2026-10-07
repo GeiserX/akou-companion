@@ -6,6 +6,7 @@ import Foundation
 
 /// The one recorder. Other parts of the app (the uploader, the library, the record intent) code
 /// against this: `start`, `pause`, `resume`, `stop`, and `onFinished` for every file that is done.
+/// `AkouCompanionApp.init` connects it: the key from the Keychain, the upload queue, the intents.
 ///
 /// The file is the recording; live text is a bonus that never holds it up. With no server set,
 /// no key, or a server without live text, it records just the same.
@@ -42,11 +43,14 @@ final class RecordingController: ObservableObject {
     /// The server key, supplied by the settings, which keep it in the Keychain. Nil records
     /// without live text.
     var serverKey: () -> String? = { nil }
+    /// Where the samples come from: the microphone, or a file in the app's tests.
+    var makeSource: (@escaping @Sendable ([Float]) -> Void) -> any SampleSource = { AudioCapture(sink: $0) }
+    var requestPermission: () async -> Bool = { await AVAudioApplication.requestRecordPermission() }
 
     private struct Current {
         let id: UUID
         let file: RecordingFile
-        let capture: AudioCapture
+        let capture: any SampleSource
         let live: LiveSession?
         let startedAt: Date
         let workspace: String?
@@ -60,18 +64,19 @@ final class RecordingController: ObservableObject {
     private var current: Current?
     private var resumedAt = Date()
     private var pausedBySystem = false
-    private let activity = ActivityController()
+    /// Internal so the app tests can read what the Live Activity shows.
+    let activity = ActivityController()
 
     private init() {}
 
     func start(workspace: String?, title: String?) async throws {
         guard state == .idle, current == nil else { throw Failure.alreadyRecording }
-        guard await AVAudioApplication.requestRecordPermission() else { throw Failure.microphoneDenied }
+        guard await requestPermission() else { throw Failure.microphoneDenied }
         guard state == .idle, current == nil else { throw Failure.alreadyRecording }
 
         let id = UUID()
         let file = try RecordingFile(url: try Self.recordingsDirectory().appending(path: "\(id.uuidString).opus"))
-        let capture = AudioCapture { [file] samples in file.append(samples) }
+        let capture = makeSource { [file] samples in file.append(samples) }
         do {
             try capture.start()
         } catch {
@@ -80,9 +85,9 @@ final class RecordingController: ObservableObject {
             throw error
         }
 
-        let defaults = UserDefaults.standard
-        let language = defaults.string(forKey: "liveLanguage") ?? "auto"
-        let model = defaults.string(forKey: "liveModel") ?? "auto"
+        // An emptied language or model field means auto, as the upload reads it.
+        let language = ServerSettings.language
+        let model = ServerSettings.model
         let live = makeLiveSession(file: file, language: language, model: model)
         let forwarder = Task {
             for await page in file.pages { await live?.send(page: page.data, endsAt: page.end) }
@@ -110,7 +115,7 @@ final class RecordingController: ObservableObject {
                 self.resume()
             }
         }
-        activity.start(title: title ?? workspace ?? "akou", startedAt: now)
+        activity.start(title: title ?? workspace ?? "akou", startedAt: now, liveText: live != nil)
 
         if let live {
             liveState = .connecting
@@ -194,6 +199,8 @@ final class RecordingController: ObservableObject {
             transcript.gap(from: from, to: to)
         case let .state(s):
             liveState = s
+            // A refusal ends live text for this recording; `stopped` is the recording's own end.
+            if case let .off(reason) = s, reason != "stopped" { activity.setLiveText(false) }
         }
     }
 

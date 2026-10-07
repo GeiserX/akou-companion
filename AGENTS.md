@@ -25,7 +25,14 @@ swift test                                   # AkouKit, on a Mac
 xcodegen generate --spec App/project.yml     # writes App/AkouCompanion.xcodeproj
 xcodebuild build -project App/AkouCompanion.xcodeproj -scheme AkouCompanion \
   -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
+xcodebuild test -project App/AkouCompanion.xcodeproj -scheme AkouCompanion \
+  -destination 'platform=iOS Simulator,name=iPhone 17'   # the app's seams, in App/Tests
 ```
+
+`App/Tests/` runs inside the app in the Simulator, signed to run locally (the Keychain and the App
+Group need it). `EndToEndTests` there sends one recording through a real akou server and skips
+unless given `TEST_RUNNER_AKOU_E2E_URL`, `TEST_RUNNER_AKOU_E2E_KEY_FILE` and `TEST_RUNNER_AKOU_E2E_PCM`
+(its header says what each holds). It plays a second of audio: mute the Mac first.
 
 `Tests/AkouKitTests/Fixtures/ffmpeg-1s-16k.opus` is an Ogg Opus file made by ffmpeg's own muxer:
 the Ogg tests read every page of it and must rebuild it byte for byte.
