@@ -215,3 +215,52 @@ final class OnceFlag: @unchecked Sendable {
         }
     }
 }
+
+/// A server that answers every request, the live upgrade included, with one plain HTTP status and
+/// a JSON error body, the way akou refuses `GET /v1/live` before any socket exists. It counts the
+/// requests, so a test can tell a terminal refusal from one the session retries.
+final class PlainHTTPRefusal: @unchecked Sendable {
+    let status: Int
+    let code: String
+    private let listener: NWListener
+    private let queue = DispatchQueue(label: "plain-http-refusal")
+    private let lock = NSLock()
+    private var _requests = 0
+
+    var requests: Int { lock.withLock { _requests } }
+
+    init(status: Int, code: String) throws {
+        self.status = status
+        self.code = code
+        listener = try NWListener(using: .tcp, on: .any)
+    }
+
+    func start() async throws -> URL {
+        listener.newConnectionHandler = { [weak self] conn in
+            guard let self else { return }
+            conn.start(queue: self.queue)
+            conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, _, _ in
+                guard let self, data != nil else { return conn.cancel() }
+                self.lock.withLock { self._requests += 1 }
+                let body = #"{"error":"\#(self.code)","message":"refused by the test server"}"#
+                let head = "HTTP/1.1 \(self.status) Refused\r\nContent-Type: application/json\r\n"
+                    + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n"
+                conn.send(content: Data((head + body).utf8), completion: .contentProcessed { _ in conn.cancel() })
+            }
+        }
+        let port: UInt16 = try await withCheckedThrowingContinuation { cont in
+            let once = OnceFlag()
+            listener.stateUpdateHandler = { [listener] state in
+                switch state {
+                case .ready: if once.take() { cont.resume(returning: listener.port!.rawValue) }
+                case let .failed(e): if once.take() { cont.resume(throwing: e) }
+                default: break
+                }
+            }
+            listener.start(queue: queue)
+        }
+        return URL(string: "http://127.0.0.1:\(port)")!
+    }
+
+    func stop() { listener.cancel() }
+}

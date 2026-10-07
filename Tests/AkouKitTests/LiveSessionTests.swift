@@ -164,6 +164,45 @@ final class LiveSessionTests: XCTestCase {
         XCTAssertEqual(server.sessions.count, 1, "no reopen")
     }
 
+    /// akou answers the upgrade with a plain 503 `no_live_engine` when it has no streaming model:
+    /// live text ends after one try instead of reopening every 30 s for the whole recording.
+    func testA503AtTheUpgradeIsNoLiveEngineAndTerminal() async throws {
+        let server = try PlainHTTPRefusal(status: 503, code: "no_live_engine")
+        defer { server.stop() }
+        let base = try await server.start()
+        let pages = try PageMaker(serial: 14)
+        let session = LiveSession(
+            baseURL: base, key: "ak_test", hello: LiveHello(), headerPages: pages.headers,
+            policy: .init(backoff: [.milliseconds(20)]), session: urlSession
+        )
+        let log = EventLog(session.events)
+        await session.start()
+        await log.expect { $0.states.contains(.off(reason: "no_live_engine")) }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(log.states, [.connecting, .off(reason: "no_live_engine")])
+        XCTAssertEqual(server.requests, 1, "no reopen")
+        await session.stop()
+    }
+
+    /// The control for the test above: a 502 from a proxy is not the server saying no, so the
+    /// session keeps trying.
+    func testA502AtTheUpgradeIsRetried() async throws {
+        let server = try PlainHTTPRefusal(status: 502, code: "bad_gateway")
+        defer { server.stop() }
+        let base = try await server.start()
+        let pages = try PageMaker(serial: 15)
+        let session = LiveSession(
+            baseURL: base, key: "ak_test", hello: LiveHello(), headerPages: pages.headers,
+            policy: .init(backoff: [.milliseconds(20)]), session: urlSession
+        )
+        let log = EventLog(session.events)
+        await session.start()
+        await log.expect { _ in server.requests >= 3 }
+        XCTAssertTrue(log.states.contains(.paused(reason: "network")))
+        XCTAssertFalse(log.states.contains { if case .off = $0 { return true }; return false })
+        await session.stop()
+    }
+
     /// Opt-in: streams the ffmpeg fixture in real time through a real akou server. Runs only with
     /// AKOU_URL and AKOU_API_KEY set, for example against a throwaway server-mode akou.
     func testARealServerWhenConfigured() async throws {

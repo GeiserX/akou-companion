@@ -322,6 +322,9 @@ public actor LiveSession {
             case nil: return "network"
             case 401: return "unauthorized"
             case 404: return "no_live_route"
+            // akou answers the upgrade with a plain 503 when no streaming model is on disk; any
+            // other 5xx is a proxy or a restart, worth another try.
+            case 503: return "no_live_engine"
             case let s? where s >= 500: return "network"
             case let s?: return "http_\(s)"
             }

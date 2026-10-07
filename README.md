@@ -35,7 +35,7 @@ What is built today, in AkouKit:
 
 In the app: a record screen with a workspace per recording, the elapsed time and the live text, recording into `Application Support/Recordings/<id>.opus`, pausing for a call or Siri and resuming into the same file, and the Live Activity.
 
-What comes next, milestone by milestone: recording on a locked phone, one press from the Action button, a Live Activity, the final transcript with tap-to-seek, the server as the library, and the Apple Watch.
+What comes next, milestone by milestone: recording on a locked phone, one press from the Action button, the final transcript with tap-to-seek, the server as the library, and the Apple Watch.
 
 ## Quick start
 
