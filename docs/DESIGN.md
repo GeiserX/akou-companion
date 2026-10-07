@@ -22,7 +22,8 @@ flowchart LR
 
 - **AkouKit** (this repository's Swift package, tested with `swift test` on a Mac): `AkouProtocol` holds the message types, `AkouOpus` the libopus encoder and the Ogg page writer, `AkouClient` the live client and the server probe.
 - **The app** (`App/`, generated with XcodeGen): the recorder, the transcript view, the uploader, the recordings list and the settings.
-- **The widget extension**: the Live Activity, and from M2 the record control for the Action button, the Lock Screen and Control Center.
+- **The widget extension**: the Live Activity, the record control for the Action button, the Lock Screen and Control Center, and the recent-recordings widget. It holds no key and makes no network request: the record intents run in the app process, and the widget reads a snapshot of the last five recordings that the app writes to the shared App Group container.
+- **App Intents**: start, stop and toggle recording (`AudioRecordingIntent`, so the system shows the recording indicator and the intent starts the Live Activity), and "last recording summary", which reads the same snapshot.
 
 ## Milestones
 
@@ -53,5 +54,6 @@ The server's Keys page shows a QR code with the URL and a new key, and the app s
 - **The phone's file is the recording of record.** The live socket is for text only and can drop at any time without losing audio.
 - **No resume on the socket.** A reconnect is a new session that starts at the recording's current position, and the final pass fills the gap. Replaying missed pages is not part of the protocol; if gaps turn out long and frequent in M1, that is a protocol change to design then.
 - **Opus in Ogg, made on the phone.** libopus through a pinned Swift package; the pages are the same bytes in the file and on the wire.
+- **Summaries are made on the phone.** akou has no summary route for jobs, so "last recording summary" uses Apple's on-device model (iOS 26 with Apple Intelligence) and otherwise the transcript's opening sentences. Nothing is sent to a third party.
 - **One live engine per server.** akou loads one streaming engine at a time, so phones on one server share it.
 - **License.** GPL-3.0-or-later, with an additional permission under section 7 for distribution through Apple's App Store and TestFlight ([NOTICE](../NOTICE)).

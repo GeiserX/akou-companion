@@ -11,6 +11,10 @@ server. The design is [docs/DESIGN.md](docs/DESIGN.md); the wire protocol is
 - `Sources/COpusShim/`: C wrappers for `opus_encoder_ctl`, which is variadic and cannot be called from Swift.
 - `App/`: the iOS app and its widget extension. `App/project.yml` is the XcodeGen spec; the
   `.xcodeproj` is generated and never committed. Settings are in `App/Config/*.xcconfig`.
+- `App/Shared/` is compiled into both the app and the widget extension: a control only offers an
+  intent that both targets contain. The record intents call `RecordIntentHost`, which each target
+  defines for itself (`App/Sources/Intents/` drives the recorder; `App/Widgets/` refuses). The two
+  targets share the App Group `group.io.github.geiserx.akou-companion` (`App/Config/*.entitlements`).
 
 ## Build and test
 

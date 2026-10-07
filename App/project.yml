@@ -23,8 +23,9 @@ targets:
         product: AkouKit
       - target: AkouCompanionWidgets
         embed: true
-  # The Live Activity and, from milestone M2, the record control for the Action button, the Lock
-  # Screen and Control Center. A stub for now: it shows a recording's state and elapsed time.
+  # The Live Activity, the record control for the Action button, the Lock Screen and Control Center,
+  # and the recent-recordings widget. Shared/ is in both targets: a control only offers an intent
+  # that the app and the extension both contain. Each target has its own RecordIntentHost.
   AkouCompanionWidgets:
     type: app-extension
     platform: iOS
@@ -34,6 +35,9 @@ targets:
     configFiles:
       Debug: Config/Widgets.xcconfig
       Release: Config/Widgets.xcconfig
+    dependencies:
+      - package: AkouKit
+        product: AkouKit
 schemes:
   AkouCompanion:
     build:
