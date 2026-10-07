@@ -1,0 +1,25 @@
+{
+  "name": "akou",
+  "version": "0.6.2",
+  "mode": "server",
+  "presets": [
+    {"name": "lite", "available": false, "engines": ["silero-vad", "parakeet-tdt-0.6b-v3-int8", "nemotron-3.5-asr-streaming-0.6b"], "diarizer": "nemotron-3-diarization", "fusion": null, "hardware": "arm64 boards, N100-class x64", "speed": "estimated"},
+    {"name": "fast", "available": true, "engines": ["parakeet-tdt-0.6b-v3-fp32"], "diarizer": "nemotron-3-diarization", "fusion": null, "hardware": "any x64 CPU, the default on CPU", "speed": "measured"},
+    {"name": "best", "available": false, "engines": ["qwen3-asr-1.7b"], "diarizer": "nemotron-3-diarization", "fusion": null, "hardware": "a GPU", "speed": "estimated"},
+    {"name": "fusion", "available": false, "engines": ["qwen3-asr-1.7b", "whisper-large-v3", "parakeet-tdt-0.6b-v3-fp32"], "diarizer": "nemotron-3-diarization", "fusion": "rover-conf", "hardware": "a GPU, as for best: every engine decodes the whole file, one after another", "speed": "estimated"},
+    {"name": "auto", "available": true, "engines": [], "diarizer": "nemotron-3-diarization", "fusion": null, "hardware": "everyone who did not choose", "speed": "estimated", "resolves_to": "fast"}
+  ],
+  "auto": {"preset": "fast", "model": "parakeet-tdt-0.6b-v3-fp32", "reason": "no GPU, so the CPU preset"},
+  "engines": [{"id": "parakeet-tdt-0.6b-v3-fp32", "provider": "cpu", "installed": true}],
+  "gpu": null,
+  "accelerator": {"setting": "auto", "active": "cpu", "device": null, "verified": false, "available": [], "reason": "no GPU found"},
+  "remotes": [],
+  "retain_days": 30,
+  "default_diarize": false,
+  "queue": {"concurrency": 1, "max": 0, "max_per_key": 0, "depth": 0, "queued": 0, "running": 0, "jobs_last_hour": 0, "audio_seconds_last_hour": 0, "mean_job_seconds": null, "eta_seconds": 0, "loaded": []},
+  "dictation": {"slots": 0, "engine": "fast", "served_last_hour": 0},
+  "live": {"engines": ["nemotron-en-560", "nemotron-3.5-560"]},
+  "capabilities": {"jobs": true, "webhooks": true, "events": true, "openai": true, "interactive": false, "languages_bound": true, "live": true, "wyoming": false, "bazarr": false},
+  "bound_languages": ["en", "es"],
+  "links": {"openapi": "/v1/openapi.json"}
+}
