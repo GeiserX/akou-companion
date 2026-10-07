@@ -13,7 +13,13 @@ akou-companion is an iPhone app that records on the phone and shows a live trans
 
 It talks to any akou server you point it at, with a URL and an `ak_` key. Nothing goes through a third party.
 
-Status: early. This repository holds AkouKit (the tested core) and the app's record screen; there is no build to install yet. The milestones are in [docs/DESIGN.md](docs/DESIGN.md).
+Status: early. This repository holds AkouKit (the tested core) and the app's record screen; there is no build to install yet. The milestones are in [docs/DESIGN.md](docs/DESIGN.md):
+
+- M0, the server's live route: done in akou
+- M1, foreground recording with live text and upload: in progress
+- M2, locked-screen recording, Action button, Live Activity, offline queue: in progress
+- M3, the server as the library, a last-recording summary and a recent-recordings widget: in progress
+- M4, QR pairing and the Apple Watch: planned ([docs/M4.md](docs/M4.md))
 
 ## Features
 
@@ -46,6 +52,8 @@ To run it on a phone, put your team id in `App/Config/Local.xcconfig` as `DEVELO
 ## Documentation
 
 - [Design and milestones](docs/DESIGN.md)
+- [M4 plan](docs/M4.md): QR pairing and the Apple Watch
+- [TestFlight](docs/TESTFLIGHT.md): putting a build on your own iPhone
 - [The live protocol](docs/PROTOCOL.md): akou's `GET /v1/live`, frames, messages, close codes
 - [akou server guide](https://github.com/GeiserX/akou/blob/main/docs/server.md): running the server the app talks to
 
