@@ -66,12 +66,15 @@ final class RecordingPlayer {
             let status = item.status
             let seconds = item.duration.seconds
             let error = item.error?.localizedDescription
-            Task { @MainActor [weak self] in self?.statusChanged(status, seconds: seconds, error: error) }
+            let id = ObjectIdentifier(item)
+            Task { @MainActor [weak self] in self?.statusChanged(of: id, status, seconds: seconds, error: error) }
         }
     }
 
-    private func statusChanged(_ status: AVPlayerItem.Status, seconds: Double, error: String?) {
-        guard player != nil else { return }
+    /// `item` is the observed item: a callback queued before `stop()` or the next `load()` belongs
+    /// to a replaced item and changes nothing.
+    private func statusChanged(of item: ObjectIdentifier, _ status: AVPlayerItem.Status, seconds: Double, error: String?) {
+        guard let current = player?.currentItem, ObjectIdentifier(current) == item else { return }
         switch status {
         case .readyToPlay:
             duration = seconds.isFinite ? seconds : nil
