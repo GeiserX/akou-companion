@@ -68,8 +68,9 @@ final class BackgroundUploader: NSObject {
         Task { await reconcile() }
     }
 
-    /// Queues a finished recording. `file` must be inside the app's container.
-    func enqueue(recordingID: String, file: URL, title: String?) async {
+    /// Queues a finished recording, under the workspace and language it was recorded with. `file`
+    /// must be inside the app's container.
+    func enqueue(recordingID: String, file: URL, title: String?, workspace: String?, language: String) async {
         start()
         guard let queue else { return }
         let path = file.resolvingSymlinksInPath().path
@@ -78,8 +79,8 @@ final class BackgroundUploader: NSObject {
         let submission = JobsClient.Submission(
             recordingID: recordingID,
             title: title,
-            language: ServerSettings.language,
-            workspace: ServerSettings.workspace
+            language: language,
+            workspace: workspace
         )
         _ = try? await queue.enqueue(submission, fileName: relative)
         await pump()

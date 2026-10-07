@@ -11,6 +11,9 @@ struct RecordingAttributes: ActivityAttributes {
         var paused: Bool
         /// The last closed line of the live transcript, empty until there is one.
         var lastLine: String
+        /// False when this recording has no live text (no server or key, none on the server, or a
+        /// refusal), so an empty `lastLine` reads "no live text" rather than "no line yet".
+        var liveText: Bool
     }
 
     var title: String

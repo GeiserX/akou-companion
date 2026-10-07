@@ -28,7 +28,7 @@ final class RecordingPlayer {
     /// Held for as long as the player: AVFoundation keeps its resource loader's delegate weakly.
     @ObservationIgnored private var loader: AuthorizedAudioLoader?
     @ObservationIgnored private var timeObserver: Any?
-    @ObservationIgnored private var statusTask: Task<Void, Never>?
+    @ObservationIgnored private var statusObservation: NSKeyValueObservation?
 
     /// Sets up the player for a job. `local` is the phone's copy when it has one.
     func load(jobId: String, keptOnServer: Bool, local: URL?, client: JobsClient?) {
@@ -59,19 +59,26 @@ final class RecordingPlayer {
                 self.playing = player.rate != 0
             }
         }
-        statusTask = Task { [weak self] in
-            for await status in item.publisher(for: \.status).values {
-                guard let self else { return }
-                switch status {
-                case .readyToPlay:
-                    let d = item.duration.seconds
-                    self.duration = d.isFinite ? d : nil
-                case .failed:
-                    if self.problem == nil { self.problem = item.error?.localizedDescription ?? "The audio could not be played." }
-                default:
-                    break
-                }
-            }
+        // A plain KVO observation: the Combine KVO publisher drops a change that arrives while its
+        // async sequence has no demand, and readyToPlay often comes that fast, which left the
+        // length unknown for good.
+        statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+            let status = item.status
+            let seconds = item.duration.seconds
+            let error = item.error?.localizedDescription
+            Task { @MainActor [weak self] in self?.statusChanged(status, seconds: seconds, error: error) }
+        }
+    }
+
+    private func statusChanged(_ status: AVPlayerItem.Status, seconds: Double, error: String?) {
+        guard player != nil else { return }
+        switch status {
+        case .readyToPlay:
+            duration = seconds.isFinite ? seconds : nil
+        case .failed:
+            if problem == nil { problem = error ?? "The audio could not be played." }
+        default:
+            break
         }
     }
 
@@ -104,8 +111,8 @@ final class RecordingPlayer {
         player?.pause()
         if let timeObserver { player?.removeTimeObserver(timeObserver) }
         timeObserver = nil
-        statusTask?.cancel()
-        statusTask = nil
+        statusObservation?.invalidate()
+        statusObservation = nil
         player = nil
         loader = nil
         playing = false
