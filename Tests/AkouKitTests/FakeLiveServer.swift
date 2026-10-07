@@ -6,30 +6,58 @@ import Network
 /// the bearer on the upgrade, answers `hello` with `ready`, echoes one token per binary frame and
 /// answers `stop` with the last words, `closed` and a normal close. Every frame has exactly the
 /// fields akou's server sends (src/main/server/live.ts), no more.
+///
+/// Each session (a socket that sent `hello`) takes the next of `behaviours`, the last one repeating,
+/// so a test can make the first session fail and the reopened one work.
 final class FakeLiveServer: @unchecked Sendable {
-    enum Behaviour {
+    enum Behaviour: Equatable {
         case normal
         /// Answer `hello` with an `engine_busy` error and close 4409.
         case engineBusy
+        /// After this many audio pages, report `too_fast` and close 4400, as akou does once more
+        /// than 30 s of audio waits for the engine.
+        case tooFast(afterPages: Int)
+        /// After this many audio pages, report `key_revoked` and close 4401.
+        case keyRevoked(afterPages: Int)
+        /// After this many audio pages, stop reading the socket: a server or network that stalls.
+        case stall(afterPages: Int)
+    }
+
+    /// One frame a session received.
+    enum Frame: Equatable {
+        case text(String)
+        case binary(Data)
     }
 
     let key: String
-    let behaviour: Behaviour
+    let behaviours: [Behaviour]
     private let listener: NWListener
     private let queue = DispatchQueue(label: "fake-live-server")
     private let lock = NSLock()
     private let authLog: AuthLog
     private var _texts: [String] = []
     private var _binaries: [Data] = []
+    private var _sessions: [[Frame]] = []
+    private var sessionOf: [ObjectIdentifier: Int] = [:]
+    private var binaryFrames: [ObjectIdentifier: Int] = [:]
+    private var audioPages: [ObjectIdentifier: Int] = [:]
+    private var closed: Set<ObjectIdentifier> = []
     private var connections: [NWConnection] = []
 
     var authorization: [String] { authLog.values }
     var texts: [String] { lock.withLock { _texts } }
     var binaries: [Data] { lock.withLock { _binaries } }
+    /// Every session's frames in the order they arrived, one entry per `hello`.
+    var sessions: [[Frame]] { lock.withLock { _sessions } }
 
-    init(key: String = "ak_test", behaviour: Behaviour = .normal) throws {
+    convenience init(key: String = "ak_test", behaviour: Behaviour = .normal) throws {
+        try self.init(key: key, behaviours: [behaviour])
+    }
+
+    init(key: String = "ak_test", behaviours: [Behaviour]) throws {
+        precondition(!behaviours.isEmpty)
         self.key = key
-        self.behaviour = behaviour
+        self.behaviours = behaviours
         let ws = NWProtocolWebSocket.Options()
         ws.autoReplyPing = true
         // The handler must be set before the listener copies the parameters.
@@ -82,24 +110,46 @@ final class FakeLiveServer: @unchecked Sendable {
         conn.receiveMessage { [weak self] data, context, _, error in
             guard let self, error == nil, let data else { return }
             let meta = context?.protocolMetadata(definition: NWProtocolWebSocket.definition) as? NWProtocolWebSocket.Metadata
+            let id = ObjectIdentifier(conn)
+            if self.lock.withLock({ self.closed.contains(id) }) { return }
             switch meta?.opcode {
             case .text: self.onText(String(decoding: data, as: UTF8.self), conn)
             case .binary: self.onBinary(data, conn)
             default: break
             }
+            if case let .stall(after) = self.behaviour(of: conn), self.lock.withLock({ self.audioPages[id, default: 0] }) >= after {
+                return // never read again: the client's sends back up
+            }
             self.receive(on: conn)
+        }
+    }
+
+    private func behaviour(of conn: NWConnection) -> Behaviour {
+        let index = lock.withLock { sessionOf[ObjectIdentifier(conn)] } ?? 0
+        return behaviours[min(index, behaviours.count - 1)]
+    }
+
+    private func record(_ frame: Frame, _ conn: NWConnection, hello: Bool = false) {
+        let id = ObjectIdentifier(conn)
+        lock.withLock {
+            if hello, sessionOf[id] == nil {
+                sessionOf[id] = _sessions.count
+                _sessions.append([])
+            }
+            if let i = sessionOf[id] { _sessions[i].append(frame) }
         }
     }
 
     private func onText(_ text: String, _ conn: NWConnection) {
         lock.withLock { _texts.append(text) }
         let type = (try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])?["type"] as? String
-        switch (type, behaviour) {
-        case ("hello", .normal):
-            send(#"{"type":"ready","engine":"fake-live","lang":"auto","tier_ms":560,"load_ms":3}"#, on: conn)
+        record(.text(text), conn, hello: type == "hello")
+        switch (type, behaviour(of: conn)) {
         case ("hello", .engineBusy):
             send(#"{"type":"error","code":"engine_busy","message":"another session uses another engine"}"#, on: conn)
             close(conn, code: 4409)
+        case ("hello", _):
+            send(#"{"type":"ready","engine":"fake-live","lang":"auto","tier_ms":560,"load_ms":3}"#, on: conn)
         case ("stop", _):
             send(#"{"type":"words","tokens":[{"text":" end","t":9.9,"conf":0.8}]}"#, on: conn)
             send(#"{"type":"closed"}"#, on: conn)
@@ -110,13 +160,26 @@ final class FakeLiveServer: @unchecked Sendable {
     }
 
     private func onBinary(_ data: Data, _ conn: NWConnection) {
+        let id = ObjectIdentifier(conn)
+        record(.binary(data), conn)
         let n = lock.withLock { () -> Int in
             _binaries.append(data)
-            return _binaries.count
+            binaryFrames[id, default: 0] += 1
+            // The first two binary frames of a session are the OpusHead and OpusTags pages.
+            audioPages[id] = max(0, binaryFrames[id]! - 2)
+            return binaryFrames[id]!
         }
-        // The first two binary frames are the OpusHead and OpusTags pages: no words for them.
         guard n > 2 else { return }
-        send(#"{"type":"words","tokens":[{"text":" page\#(n - 2)","t":\#(Double(n - 2) / 5),"conf":0.9}]}"#, on: conn)
+        switch behaviour(of: conn) {
+        case let .tooFast(after) where n - 2 >= after:
+            send(#"{"type":"error","code":"too_fast","message":"more than 30 s of audio is waiting for the engine"}"#, on: conn)
+            close(conn, code: 4400)
+        case let .keyRevoked(after) where n - 2 >= after:
+            send(#"{"type":"error","code":"key_revoked","message":"the key was revoked"}"#, on: conn)
+            close(conn, code: 4401)
+        default:
+            send(#"{"type":"words","tokens":[{"text":" page\#(n - 2)","t":\#(Double(n - 2) / 5),"conf":0.9}]}"#, on: conn)
+        }
     }
 
     private func send(_ text: String, on conn: NWConnection) {
@@ -126,6 +189,7 @@ final class FakeLiveServer: @unchecked Sendable {
     }
 
     private func close(_ conn: NWConnection, code: UInt16) {
+        lock.withLock { _ = closed.insert(ObjectIdentifier(conn)) }
         let meta = NWProtocolWebSocket.Metadata(opcode: .close)
         meta.closeCode = code == 1000 ? .protocolCode(.normalClosure) : .applicationCode(code)
         let ctx = NWConnection.ContentContext(identifier: "close", metadata: [meta])
