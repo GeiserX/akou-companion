@@ -14,7 +14,8 @@ struct SettingsView: View {
     @AppStorage(ServerSettings.liveModel) private var liveModel = "auto"
     @AppStorage(ServerSettings.keepLocalCopy) private var keepLocalCopy = false
     @State private var key = ""
-    @State private var keySaved = true
+    /// The key as the Keychain holds it, so only a real change is saved and retries parked uploads.
+    @State private var savedKey = ""
     @State private var newWorkspace = ""
     @State private var engines: [String] = []
     @State private var result: String?
@@ -33,7 +34,6 @@ struct SettingsView: View {
                 SecureField("ak_ key", text: $key)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                    .onChange(of: key) { keySaved = false }
                     .onSubmit(saveKey)
             }
             Section {
@@ -81,8 +81,8 @@ struct SettingsView: View {
         }
         .navigationTitle("akou")
         .onAppear {
-            key = KeyStore.load() ?? ""
-            keySaved = true
+            savedKey = KeyStore.load() ?? ""
+            key = savedKey
         }
         .onDisappear(perform: saveKey)
     }
@@ -96,8 +96,9 @@ struct SettingsView: View {
     }
 
     private func saveKey() {
-        guard !keySaved else { return }
-        keySaved = KeyStore.save(key)
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != savedKey, KeyStore.save(trimmed) else { return }
+        savedKey = trimmed
         // A new key or URL may unblock uploads that were refused with the old one.
         Task { await BackgroundUploader.shared.settingsChanged() }
     }
