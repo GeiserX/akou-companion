@@ -98,6 +98,7 @@ final class RecordingController: ObservableObject {
         resumedAt = now
         pausedBySystem = false
         state = .recording(startedAt: now)
+        RecordingStatus.set(recording: true)
         capture.onInterruption = { [weak self] began, shouldResume in
             guard let self else { return }
             if began {
@@ -168,6 +169,7 @@ final class RecordingController: ObservableObject {
             workspace: rec.workspace, title: rec.title, language: rec.language, model: rec.model
         )
         state = .idle
+        RecordingStatus.set(recording: false)
         onFinished?(finished)
         return finished
     }
@@ -203,5 +205,16 @@ final class RecordingController: ObservableObject {
             attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
         )
         return dir
+    }
+}
+
+/// The record intents' view of the recorder. Every end of a recording goes through `stop()`, which
+/// is also where the record control learns that it ended.
+extension RecordingController: RecordIntentRecorder {
+    var isRecording: Bool { state != .idle }
+    var isPaused: Bool { state == .paused }
+
+    func stopRecording() async {
+        _ = await stop()
     }
 }
