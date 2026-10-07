@@ -13,6 +13,10 @@ server. The design is [docs/DESIGN.md](docs/DESIGN.md); the wire protocol is
   (`RecordingController.shared` is the contract other parts code against, `FinishedRecording` what it
   hands out); `App/Sources/Record/` is the record screen. `App/project.yml` is the XcodeGen spec; the
   `.xcodeproj` is generated and never committed. Settings are in `App/Config/*.xcconfig`.
+- `App/Shared/` is compiled into both the app and the widget extension: a control only offers an
+  intent that both targets contain. The record intents call `RecordIntentHost`, which each target
+  defines for itself (`App/Sources/Intents/` drives the recorder; `App/Widgets/` refuses). The two
+  targets share the App Group `group.io.github.geiserx.akou-companion` (`App/Config/*.entitlements`).
 
 ## Build and test
 
