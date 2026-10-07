@@ -13,7 +13,7 @@ akou-companion is an iPhone app that records on the phone and shows a live trans
 
 It talks to any akou server you point it at, with a URL and an `ak_` key. Nothing goes through a third party.
 
-Status: early. This repository holds AkouKit (the tested core) and the app skeleton; there is no build to install yet. The milestones are in [docs/DESIGN.md](docs/DESIGN.md):
+Status: early. This repository holds AkouKit (the tested core) and the app's record screen; there is no build to install yet. The milestones are in [docs/DESIGN.md](docs/DESIGN.md):
 
 - M0, the server's live route: done in akou
 - M1, foreground recording with live text and upload: in progress
@@ -28,10 +28,14 @@ What is built today, in AkouKit:
 - Opus encoding through libopus at 16 kHz mono, 24 kbit/s, 20 ms frames: about 11 MB per hour
 - Ogg pages of 200 ms that are byte-identical to ffmpeg's muxer, checked against an ffmpeg-made file
 - A live client for akou's `GET /v1/live`: one WebSocket, Ogg pages up, words down
+- A live session on top of it that survives a slow or dropped server: a 5 s send queue, a fresh session with backoff when it falls behind or the network drops, and a marked gap for the audio it missed
+- The live transcript: tokens joined into words, lines on sentence ends and pauses, gaps kept in place
 - A server probe for the settings screen: is it akou, does the key work, can it show live text
 - The `https`-or-private-address rule for where audio and the key may go
 
-What the app adds, milestone by milestone: recording on a locked phone, one press from the Action button, a Live Activity, the final transcript with tap-to-seek, the server as the library, and the Apple Watch.
+In the app: a record screen with a workspace per recording, the elapsed time and the live text, recording into `Application Support/Recordings/<id>.opus`, pausing for a call or Siri and resuming into the same file, and the Live Activity.
+
+What comes next, milestone by milestone: recording on a locked phone, one press from the Action button, the final transcript with tap-to-seek, the server as the library, and the Apple Watch.
 
 ## Quick start
 

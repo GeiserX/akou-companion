@@ -9,6 +9,21 @@ public struct ServerInfo: Decodable, Sendable, Equatable {
     /// `server` on a server, `app` on a desktop app (which a phone cannot reach).
     public var mode: String?
     public var capabilities: Capabilities
+    /// The live door in server mode: the streaming models on disk a `hello` may name. Null in the
+    /// desktop app and absent on servers older than the route.
+    public var live: Live?
+    /// `server.retain_days`: the days a job and its result stay, counted from its creation. A job
+    /// sent with `keep_audio=true` is exempt. Absent on older servers.
+    public var retainDays: Int?
+
+    public struct Live: Decodable, Sendable, Equatable {
+        public var engines: [String]
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, version, mode, capabilities, live
+        case retainDays = "retain_days"
+    }
 
     public struct Capabilities: Decodable, Sendable, Equatable {
         public var jobs: Bool?
@@ -18,6 +33,9 @@ public struct ServerInfo: Decodable, Sendable, Equatable {
 
     /// Whether this server can show live text.
     public var supportsLive: Bool { capabilities.live == true }
+
+    /// The streaming models a phone may pin as its live model; empty when the server lists none.
+    public var liveEngines: [String] { live?.engines ?? [] }
 }
 
 /// akou's `GET /v1/keys/me` answer.
