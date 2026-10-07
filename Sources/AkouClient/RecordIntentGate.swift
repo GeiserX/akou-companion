@@ -9,10 +9,16 @@ public protocol RecordIntentRecorder: AnyObject {
     var isPaused: Bool { get }
     /// Starts recording and the Live Activity. `workspace` nil is the key's default workspace.
     func start(workspace: String?, title: String?) async throws
-    /// Continues a paused recording in the same file.
+    /// Continues a paused recording in the same file. When the microphone does not come back, the
+    /// recorder stays paused.
     func resume()
     /// Finishes the file; the app then uploads it.
     func stopRecording() async
+}
+
+public enum RecordIntentGateError: Error, Equatable {
+    /// `resume()` left the recording paused: the microphone did not come back.
+    case resumeFailed
 }
 
 /// The decisions behind the Action button, the record control, Siri and Shortcuts, kept apart from
@@ -21,10 +27,12 @@ public protocol RecordIntentRecorder: AnyObject {
 @MainActor
 public enum RecordIntentGate {
     /// Resumes a paused recording, starts one when none is running, and does nothing otherwise.
+    /// Throws `resumeFailed` when the recording is still paused after `resume()`.
     public static func start(_ recorder: any RecordIntentRecorder, title: String?, onStatus: (Bool) -> Void) async throws {
         defer { onStatus(recorder.isRecording) }
         if recorder.isPaused {
             recorder.resume()
+            if recorder.isPaused { throw RecordIntentGateError.resumeFailed }
         } else if !recorder.isRecording {
             try await recorder.start(workspace: nil, title: title)
         }

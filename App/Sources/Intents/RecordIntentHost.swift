@@ -11,7 +11,11 @@ enum RecordIntentHost {
 
     static func start(title: String?) async throws {
         guard let recorder else { throw RecordIntentError.recorderUnavailable }
-        try await RecordIntentGate.start(recorder, title: title, onStatus: RecordingStatus.set(recording:))
+        do {
+            try await RecordIntentGate.start(recorder, title: title, onStatus: RecordingStatus.set(recording:))
+        } catch RecordIntentGateError.resumeFailed {
+            throw RecordIntentError.resumeFailed
+        }
     }
 
     static func stop() async throws {

@@ -74,11 +74,14 @@ enum RecordIntentError: Error, CustomLocalizedStringResourceConvertible {
     case recorderUnavailable
     /// The widget extension was asked to record; only the app process can.
     case notInApp
+    /// A paused recording could not continue: the microphone did not come back.
+    case resumeFailed
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
         case .recorderUnavailable: "akou cannot record right now. Open akou and try again."
         case .notInApp: "Recording starts in the akou app. Open akou and try again."
+        case .resumeFailed: "The microphone did not come back, so the recording is still paused. Open akou and try again."
         }
     }
 }

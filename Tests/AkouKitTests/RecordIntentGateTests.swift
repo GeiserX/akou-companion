@@ -10,6 +10,7 @@ private final class FakeRecorder: RecordIntentRecorder {
 
     var state = State.idle
     var refuseStart = false
+    var refuseResume = false
     private(set) var calls: [String] = []
 
     var isRecording: Bool { state != .idle }
@@ -23,6 +24,7 @@ private final class FakeRecorder: RecordIntentRecorder {
 
     func resume() {
         calls.append("resume")
+        if refuseResume { return }
         state = .recording
     }
 
@@ -61,6 +63,22 @@ final class RecordIntentGateTests: XCTestCase {
         r.state = .paused
         try await RecordIntentGate.start(r, title: nil, onStatus: note)
         XCTAssertEqual(r.calls, ["resume"])
+        XCTAssertEqual(statuses, [true])
+    }
+
+    func testAFailedResumeThrowsAndStaysPaused() async {
+        let r = FakeRecorder()
+        r.state = .paused
+        r.refuseResume = true
+        do {
+            try await RecordIntentGate.start(r, title: nil, onStatus: note)
+            XCTFail("a resume that left the recording paused must not report success")
+        } catch {
+            XCTAssertEqual(error as? RecordIntentGateError, .resumeFailed)
+        }
+        XCTAssertEqual(r.calls, ["resume"])
+        XCTAssertTrue(r.isPaused)
+        // A paused recording still holds its file, so the control keeps showing it.
         XCTAssertEqual(statuses, [true])
     }
 
