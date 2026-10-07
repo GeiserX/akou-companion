@@ -51,7 +51,7 @@ Two more ways to reach a recording without opening the app:
 
 ### M4: pairing by QR code and the Apple Watch
 
-The server's Keys page shows a QR code with the URL and a new key, and the app scans it. The watch records the same Ogg Opus file and hands it to the phone, which uploads it as a normal recording; the watch shows no live text. The design note and the spike plan are in [M4.md](M4.md).
+The proposal for pairing is that the server's Keys page shows a QR code with the URL and a new key, and the app scans it; it waits on a decision because the code shows a working key. The watch records the same Ogg Opus file and hands it to the phone, which uploads it as a normal recording; the watch shows no live text. The design note and the spike plan are in [M4.md](M4.md).
 
 ## Decisions
 

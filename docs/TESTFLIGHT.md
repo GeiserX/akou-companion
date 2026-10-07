@@ -10,7 +10,7 @@ The steps to get akou-companion from this repository onto your own iPhone throug
 
    If you publish under your own identifiers, change `BUNDLE_ID_BASE` in [`App/Config/Base.xcconfig`](../App/Config/Base.xcconfig) to match before anything else; both targets derive their identifiers from it.
 2. **Register the App Group** `group.io.github.geiserx.akou-companion` (Identifiers, App Groups) and turn on the App Groups capability with that group on both App IDs. The app and the widget extension share it from M2 for the record control, and in M3 for the recent-recordings snapshot.
-3. **Create the app in App Store Connect** (Apps, New App): platform iOS, name of your choice, bundle ID `io.github.geiserx.akou-companion`, any SKU. TestFlight needs this record even if the app never goes to the App Store.
+3. **Create the app in App Store Connect** (Apps, New App): platform iOS, name of your choice, the app's bundle ID (`io.github.geiserx.akou-companion`, or your `BUNDLE_ID_BASE` if you changed it in step 1), any SKU. TestFlight needs this record even if the app never goes to the App Store.
 4. **Set your team locally.** Create `App/Config/Local.xcconfig` (it is ignored by git) with one line:
 
    ```text
@@ -36,4 +36,4 @@ The steps to get akou-companion from this repository onto your own iPhone throug
 
 - In akou's settings enter your server's URL and an `ak_` key from the server's Keys page or `akou keys create`, then press Test.
 - To record from the Action button (from M2): Settings, Action Button, Controls, then pick akou's record control.
-- External testers (people outside your team) need a beta review and a privacy policy URL; internal testing needs neither.
+- External testers (people outside your team) need a beta review of the first build added to their group. App Store Connect also asks for a privacy policy URL before external testing or an App Store release.
