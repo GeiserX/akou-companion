@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// AVAssetResourceLoaderDelegate is unavailable on watchOS, so AkouKit builds for the watch without this file.
+#if !os(watchOS)
 import AVFoundation
 import Foundation
 import UniformTypeIdentifiers
@@ -326,3 +328,5 @@ final class RangeFetch: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         finish(nil)
     }
 }
+
+#endif

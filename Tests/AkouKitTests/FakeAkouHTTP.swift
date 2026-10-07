@@ -87,8 +87,29 @@ final class FakeAkouHTTP: URLProtocol, @unchecked Sendable {
         guard headers["authorization"] == "Bearer \(Self.key)" else {
             return answer(401, #"{"error":"unauthorized","message":"a valid bearer token is required"}"#)
         }
+        // akou's guard (src/main/api/guard.ts, bodyRule): every method but GET and HEAD needs a
+        // Content-Type, multipart for the upload route and JSON for the rest, body or not.
+        if method != "GET" && method != "HEAD" {
+            let type = (headers["content-type"] ?? "").split(separator: ";").first.map { $0.trimmingCharacters(in: .whitespaces).lowercased() } ?? ""
+            let upload = method == "POST" && url.path == "/v1/jobs"
+            if upload && type != "multipart/form-data" {
+                return answer(415, #"{"error":"multipart_required","message":"an upload needs Content-Type: multipart/form-data"}"#)
+            }
+            if !upload && type != "application/json" {
+                return answer(415, #"{"error":"json_required","message":"requests that change something need Content-Type: application/json"}"#)
+            }
+        }
         switch (method, url.path) {
         case ("POST", "/v1/jobs"): submit(seen)
+        case let ("DELETE", p) where p.hasPrefix("/v1/jobs/"):
+            let id = String(p.dropFirst("/v1/jobs/".count))
+            let removed: Bool = Self.lock.withLock {
+                guard let i = Self._jobs.firstIndex(where: { $0.id == id }) else { return false }
+                Self._jobs.remove(at: i)
+                return true
+            }
+            guard removed else { return answer(404, #"{"error":"not_found","message":"no such job"}"#) }
+            answer(200, #"{"deleted":true}"#)
         case let ("GET", p) where p.hasPrefix("/v1/jobs/"):
             let id = String(p.dropFirst("/v1/jobs/".count))
             guard let job = Self.lock.withLock({ Self._jobs.first { $0.id == id } }) else {

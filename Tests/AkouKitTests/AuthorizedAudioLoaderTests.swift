@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#if !os(watchOS)
 import AVFoundation
 import Foundation
 import XCTest
@@ -120,11 +121,9 @@ final class AuthorizedAudioLoaderTests: XCTestCase {
         return URLSession(configuration: c)
     }
 
-    /// The request the app builds with `JobsClient.audioRequest`: the path and the bearer header.
+    /// The request the app hands the loader: `JobsClient.audioRequest`, the path and the bearer header.
     static func audioRequest(_ jobId: String) throws -> URLRequest {
-        var r = URLRequest(url: base.appending(path: "/v1/jobs/\(jobId)/audio"))
-        r.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        return r
+        try JobsClient(baseURL: base, key: key).audioRequest(jobId)
     }
 
     func loader(_ failures: FailureLog? = nil) -> AuthorizedAudioLoader {
@@ -302,3 +301,5 @@ final class FailureLog: @unchecked Sendable {
     func add(_ id: String, _ f: AuthorizedAudioLoader.Failure) { lock.withLock { items.append(Failed(jobId: id, failure: f)) } }
     var all: [Failed] { lock.withLock { items } }
 }
+
+#endif

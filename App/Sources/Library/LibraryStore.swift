@@ -23,7 +23,8 @@ final class LibraryStore {
     var workspace: String?
 
     /// A page of 50 jobs may hold none of the companion's (another client's jobs in between), so a
-    /// refresh reads on until it has a screenful or this many pages.
+    /// refresh reads on until it has a screenful or this many pages, and past them until it has
+    /// one row, which `loadMore` then reads on from.
     static let pagesPerFill = 5
     static let screenful = 20
 
@@ -63,7 +64,7 @@ final class LibraryStore {
                 fresh += page.jobs.filter(Self.isCompanion)
                 next = page.cursor
                 pages += 1
-            } while next != nil && fresh.count < Self.screenful && pages < Self.pagesPerFill
+            } while next != nil && (fresh.isEmpty || (fresh.count < Self.screenful && pages < Self.pagesPerFill))
             jobs = fresh
             cursor = next
             error = nil
@@ -73,16 +74,22 @@ final class LibraryStore {
         }
     }
 
-    /// Reads the next page, when there is one.
+    /// Reads on from the cursor until a page adds a recording or the last page is read. A page
+    /// that adds none would leave the last row unchanged, and its `.task` would never ask again.
     func loadMore() async {
-        guard !loading, let next = cursor, let client = Self.client() else { return }
+        guard !loading, cursor != nil, let client = Self.client() else { return }
         loading = true
         defer { loading = false }
         do {
-            let page = try await client.list(cursor: next)
-            let known = Set(jobs.map(\.id))
-            jobs += page.jobs.filter { Self.isCompanion($0) && !known.contains($0.id) }
-            cursor = page.cursor
+            var added = 0
+            while added == 0, let next = cursor {
+                let page = try await client.list(cursor: next)
+                let known = Set(jobs.map(\.id))
+                let fresh = page.jobs.filter { Self.isCompanion($0) && !known.contains($0.id) }
+                jobs += fresh
+                added = fresh.count
+                cursor = page.cursor
+            }
         } catch {
             self.error = Self.describe(error)
         }
