@@ -23,6 +23,7 @@ What is built today, in AkouKit:
 - Ogg pages of 200 ms that are byte-identical to ffmpeg's muxer, checked against an ffmpeg-made file
 - A live client for akou's `GET /v1/live`: one WebSocket, Ogg pages up, words down
 - A server probe for the settings screen: is it akou, does the key work, can it show live text
+- Playback of a recording's audio kept on the server, streamed with `Range` requests that carry the key in a header, never in a URL
 - The `https`-or-private-address rule for where audio and the key may go
 
 What the app adds, milestone by milestone: recording on a locked phone, one press from the Action button, a Live Activity, the final transcript with tap-to-seek, the server as the library, and the Apple Watch.
