@@ -28,7 +28,7 @@ The steps to get akou-companion from this repository onto your own iPhone throug
    ```
 
    In Xcode choose the `AkouCompanion` scheme and the destination Any iOS Device (arm64), then Product, Archive. Automatic signing creates the provisioning profiles for both targets on first use.
-7. **Upload.** In the Organizer window select the archive, then Distribute App, App Store Connect, Upload. App Store Connect asks about encryption. The app's only encryption is the system's HTTPS, so answer as an app that uses only that.
+7. **Upload.** In the Organizer window select the archive, then Distribute App, App Store Connect, Upload. The app's only encryption is the system's HTTPS, and `ITSAppUsesNonExemptEncryption` is `false` in its Info.plist, so App Store Connect does not ask the export compliance question.
 8. **Wait for processing**, usually a few minutes to half an hour; App Store Connect emails when the build is ready.
 9. **Install.** In App Store Connect, TestFlight, add yourself to an internal testing group and enable the build for it. Internal testers need no review. Open the TestFlight app on the iPhone, signed in with the same Apple Account, and install akou.
 
