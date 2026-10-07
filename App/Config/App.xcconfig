@@ -3,3 +3,5 @@
 PRODUCT_NAME = akou
 PRODUCT_BUNDLE_IDENTIFIER = $(BUNDLE_ID_BASE)
 INFOPLIST_FILE = Sources/Info.plist
+// The App Group shared with the widget extension (the recent-recordings snapshot, the record state).
+CODE_SIGN_ENTITLEMENTS = Config/App.entitlements

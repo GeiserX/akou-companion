@@ -22,7 +22,7 @@ flowchart LR
 
 - **AkouKit** (this repository's Swift package, tested with `swift test` on a Mac): `AkouProtocol` holds the message types, `AkouOpus` the libopus encoder and the Ogg page writer, `AkouClient` the live client and the server probe.
 - **The app** (`App/`, generated with XcodeGen): the recorder, the transcript view, the uploader, the recordings list and the settings.
-- **The widget extension**: the Live Activity, from M2 the record control for the Action button, the Lock Screen and Control Center, and from M3 the recent-recordings widget.
+- **The widget extension**: the Live Activity, the record control for the Action button, the Lock Screen and Control Center, and the recent-recordings widget. It holds no key and makes no network request: the record intents run in the app process, and the widget reads only the App Group snapshot.
 
 ## Milestones
 
