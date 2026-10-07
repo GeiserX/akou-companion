@@ -203,6 +203,43 @@ final class LiveSessionTests: XCTestCase {
         await session.stop()
     }
 
+    /// The recorder waits for `events` to end after `stop()`, so it must end on every path: here
+    /// stop comes before start, and a start after it opens nothing.
+    func testStopBeforeStartFinishesTheEventsAndNothingOpens() async throws {
+        let server = try PlainHTTPRefusal(status: 502, code: "bad_gateway")
+        defer { server.stop() }
+        let base = try await server.start()
+        let pages = try PageMaker(serial: 16)
+        let session = LiveSession(
+            baseURL: base, key: "ak_test", hello: LiveHello(), headerPages: pages.headers,
+            policy: .init(backoff: [.milliseconds(20)]), session: urlSession
+        )
+        let log = EventLog(session.events)
+        await session.stop()
+        await log.expect { $0.finished }
+        await session.start()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(server.requests, 0, "no session after stop")
+        XCTAssertEqual(log.states, [])
+    }
+
+    /// The same for a session already ended by the server: stop still returns with `events` done.
+    func testStopAfterATerminalRefusalFinishesTheEvents() async throws {
+        let server = try PlainHTTPRefusal(status: 503, code: "no_live_engine")
+        defer { server.stop() }
+        let base = try await server.start()
+        let pages = try PageMaker(serial: 17)
+        let session = LiveSession(
+            baseURL: base, key: "ak_test", hello: LiveHello(), headerPages: pages.headers,
+            policy: .init(backoff: [.milliseconds(20)]), session: urlSession
+        )
+        let log = EventLog(session.events)
+        await session.start()
+        await log.expect { $0.states.contains(.off(reason: "no_live_engine")) }
+        await session.stop()
+        await log.expect { $0.finished }
+    }
+
     /// Opt-in: streams the ffmpeg fixture in real time through a real akou server. Runs only with
     /// AKOU_URL and AKOU_API_KEY set, for example against a throwaway server-mode akou.
     func testARealServerWhenConfigured() async throws {

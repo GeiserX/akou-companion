@@ -123,7 +123,7 @@ public actor LiveSession {
 
     /// Opens the first session.
     public func start() {
-        guard state == .off(reason: "idle") else { return }
+        guard !stopping, state == .off(reason: "idle") else { return }
         open()
     }
 
@@ -152,11 +152,13 @@ public actor LiveSession {
     }
 
     /// The recording ended: sends what is queued, then `stop`, and waits (at most `stopTimeout`)
-    /// for the server's last words and `closed`.
+    /// for the server's last words and `closed`. `events` has finished when it returns, on every
+    /// path, so a reader can wait for its loop to end without a timeout.
     public func stop() async {
         guard !stopping else { return }
-        if case .off = state { return }
         stopping = true
+        // Already off, or never started: no session to wait for, but `events` must still end.
+        if case .off = state { return continuation.finish() }
         guard case .live = state else { return end("stopped") }
         let gen = generation
         timer?.cancel()

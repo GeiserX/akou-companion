@@ -156,7 +156,9 @@ final class RecordingController: ObservableObject {
         let (seconds, error) = await rec.file.finish()
         await rec.forwarder.value
         await rec.live?.stop()
-        rec.listener?.cancel()
+        // `events` has finished once stop returns; let the listener take the last words before
+        // the transcript closes. Cancelling it would drop them or open a line after close().
+        await rec.listener?.value
         transcript.close()
         activity.end()
         current = nil
