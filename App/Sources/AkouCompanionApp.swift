@@ -9,6 +9,7 @@ struct AkouCompanionApp: App {
 
     enum Screen: Hashable {
         case record
+        case library
         case settings
     }
 
@@ -26,16 +27,20 @@ struct AkouCompanionApp: App {
                 NavigationStack { RecordView() }
                     .tabItem { Label("Record", systemImage: "record.circle") }
                     .tag(Screen.record)
+                // LibraryView holds its own NavigationStack, driven by LibraryRouter.
+                LibraryView()
+                    .tabItem { Label("Recordings", systemImage: "list.bullet") }
+                    .tag(Screen.library)
                 NavigationStack { SettingsView() }
                     .tabItem { Label("Settings", systemImage: "gear") }
                     .tag(Screen.settings)
             }
             // The Live Activity opens akou-companion://record, a recent-recordings row
-            // akou-companion://recording/<job id>. Both land on the record screen until the
-            // library screen exists to show one recording.
+            // akou-companion://recording/<job id>, which the Library opens on that recording.
             .onOpenURL { url in
                 switch DeepLink(url) {
-                case .record, .recording: selectedTab = .record
+                case .record: selectedTab = .record
+                case .recording: if LibraryRouter.shared.open(url) { selectedTab = .library }
                 case nil: break
                 }
             }

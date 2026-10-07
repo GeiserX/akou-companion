@@ -85,6 +85,18 @@ final class BackgroundUploader: NSObject {
         await pump()
     }
 
+    /// Every recording in the queue, in the order they were made, for the Library's "On this
+    /// iPhone" section.
+    func items() async -> [UploadQueue.Item] {
+        start()
+        return await queue?.items ?? []
+    }
+
+    /// The phone's own copy of a queued recording; nil when the queue is not open.
+    func localAudio(_ item: UploadQueue.Item) -> URL? {
+        queue?.audioURL(item)
+    }
+
     /// The key or the URL changed: recordings parked on a refusal get another try.
     func settingsChanged() async {
         start()

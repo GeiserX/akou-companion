@@ -31,11 +31,12 @@ What is built today, in AkouKit:
 - A live session on top of it that survives a slow or dropped server: a 5 s send queue, a fresh session with backoff when it falls behind or the network drops, and a marked gap for the audio it missed
 - The live transcript: tokens joined into words, lines on sentence ends and pauses, gaps kept in place
 - A server probe for the settings screen: is it akou, does the key work, can it show live text
+- Playback of a recording's audio kept on the server, streamed with `Range` requests that carry the key in a header, never in a URL
 - The `https`-or-private-address rule for where audio and the key may go
 
-In the app: a record screen with a workspace per recording, the elapsed time and the live text, recording into `Application Support/Recordings/<id>.opus`, pausing for a call or Siri and resuming into the same file, and the Live Activity.
+In the app: a record screen with a workspace per recording, the elapsed time and the live text, recording into `Application Support/Recordings/<id>.opus`, pausing for a call or Siri and resuming into the same file, and the Live Activity. A Recordings tab lists this app's recordings from the server, by workspace, with the final transcript (tap a word to play from there), playback, rename and delete.
 
-What comes next, milestone by milestone: recording on a locked phone, one press from the Action button, the final transcript with tap-to-seek, the server as the library, and the Apple Watch.
+What comes next, milestone by milestone: recording on a locked phone, one press from the Action button, and the Apple Watch.
 
 ## Quick start
 

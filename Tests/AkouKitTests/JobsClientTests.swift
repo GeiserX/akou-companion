@@ -90,6 +90,18 @@ final class JobsClientTests: XCTestCase {
         XCTAssertEqual(page.cursor, 17)
     }
 
+    func testDeleteSendsTheJsonContentTypeAkouRequires() async throws {
+        let audio = dir.appending(path: "r1.opus")
+        try Data("OggS".utf8).write(to: audio)
+        let submitted = try await client().submit(.init(recordingID: "rec-del"), audio: audio, bodyFile: dir.appending(path: "body"))
+        try await client().delete(submitted.job.id)
+        let req = try XCTUnwrap(FakeAkouHTTP.seen.last)
+        XCTAssertEqual(req.method, "DELETE")
+        XCTAssertEqual(req.path, "/v1/jobs/\(submitted.job.id)")
+        XCTAssertEqual(req.headers["content-type"], "application/json")
+        XCTAssertTrue(FakeAkouHTTP.jobs.isEmpty)
+    }
+
     func testRequestsForTheOtherRoutes() throws {
         let c = client()
         XCTAssertEqual(try c.jobRequest("j1", wait: 90).url?.absoluteString, "https://akou.example.com/v1/jobs/j1?wait=60")
@@ -98,6 +110,7 @@ final class JobsClientTests: XCTestCase {
         XCTAssertEqual(audio.url?.path, "/v1/jobs/j1/audio")
         XCTAssertEqual(audio.value(forHTTPHeaderField: "Range"), "bytes=100-199")
         XCTAssertEqual(audio.value(forHTTPHeaderField: "Authorization"), "Bearer ak_test")
+        XCTAssertFalse(audio.url!.absoluteString.contains("ak_test"), "the key travels in the header, never in the URL")
         // A host name over plain http is refused before any request carries the key.
         let cleartext = JobsClient(baseURL: URL(string: "http://akou.example.com")!, key: "ak_test")
         XCTAssertThrowsError(try cleartext.jobRequest("j1"))

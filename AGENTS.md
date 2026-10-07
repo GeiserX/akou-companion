@@ -7,7 +7,7 @@ server. The design is [docs/DESIGN.md](docs/DESIGN.md); the wire protocol is
 ## Layout
 
 - `Package.swift`, `Sources/`, `Tests/AkouKitTests/`: AkouKit, the Swift package with everything that
-  needs no phone (protocol types, libopus encoding and Ogg pages, the live client, the server probe).
+  needs no phone (protocol types, libopus encoding and Ogg pages, the live client, the server probe, the loader that plays server audio).
 - `Sources/COpusShim/`: C wrappers for `opus_encoder_ctl`, which is variadic and cannot be called from Swift.
 - `App/`: the iOS app and its widget extension. `App/Sources/Recorder/` is the recorder
   (`RecordingController.shared` is the contract other parts code against, `FinishedRecording` what it

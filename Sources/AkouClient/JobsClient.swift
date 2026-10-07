@@ -138,8 +138,12 @@ public struct JobsClient: Sendable {
     }
 
     /// `DELETE /v1/jobs/{id}`: the job, its result and its kept audio.
+    /// akou refuses every request but GET and HEAD without `Content-Type: application/json`
+    /// (415 `json_required`), even one with no body.
     public func delete(_ id: String) async throws {
-        let (body, response) = try await session.data(for: try request("DELETE", "/v1/jobs/\(id)"))
+        var req = try request("DELETE", "/v1/jobs/\(id)")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (body, response) = try await session.data(for: req)
         let http = response as? HTTPURLResponse
         try Self.check(status: http?.statusCode ?? 0, headers: http?.allHeaderFields ?? [:], body: body)
     }
