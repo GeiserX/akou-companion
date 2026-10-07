@@ -93,7 +93,19 @@ The trade this design accepts is that the audio exists only on the phone until t
 
 The file goes up as a normal akou job:
 
-- `POST /v1/jobs` (multipart) with `file=<id>.opus`, `title`, `language`, `model`, `keep_audio=true`, `metadata` (`{"companion":1,"recording_id":"...","workspace":"..."}`) and the header `Idempotency-Key: <recording id>`, so a retried upload returns the first job instead of a second one. The upload runs from a background `URLSession` with the body in a file.
-- `GET /v1/jobs/{id}?wait=60` until it is done, then `GET /v1/jobs/{id}/result?format=json` for words with times and confidences.
-- A job with `keep_audio=true` keeps its audio on the server until it is deleted, whatever `server.retain_days` says, and `GET /v1/jobs/{id}/audio` streams it back byte for byte, with `Range`. It answers 409 `not_kept` for a job submitted without `keep_audio`, and 410 `gone` when a kept file is no longer on disk. The job's `keep_audio` says whether the server keeps it, so the phone deletes its own copy only once it reads `true`.
+- `POST /v1/jobs` (multipart) with `file=<id>.opus`, `title`, `language`, `model` or `preset` when the user chose one, `keep_audio=true`, `metadata` (`{"companion":1,"recording_id":"...","workspace":"..."}`, at most 4 KB of JSON) and the header `Idempotency-Key: <recording id>`. The upload runs from a background `URLSession` with the body in a file.
+- The answer is 202 with a new job, or 200 with the first job when the same key, file and options came before, so a retried upload never makes a second job. The same key with another file or other options is 422 `idempotency_conflict` (with the first job's `id` and the differing `fields`). A full queue is 429 `queue_full` with `Retry-After` in seconds, answered before the body is read.
+- `keep_audio` and `metadata` are not compared on a repeated key: a retry gets the first job as it was made. The phone reads `keep_audio` from the job it gets back, never from what it sent.
+- Workspaces are a desktop-only route, so on a server the workspace is the label in `metadata`. Every job answer carries `keep_audio` and `metadata`.
+- `GET /v1/jobs/{id}?wait=60` until it is done, then `GET /v1/jobs/{id}/result?format=json` for `text`, `segments` and `words` (`{w, s, e, c}`: the word, its start and end in seconds and its confidence; `s`, `e` and `c` are null from an engine that gives none). The result answers 409 `not_done` before the job is done.
+- A job with `keep_audio=true` keeps its audio on the server until it is deleted, whatever `retain_days` in `GET /v1/server` says, and `GET /v1/jobs/{id}/audio` streams it back byte for byte, with `Range`. It answers 409 `not_kept` for a job submitted without `keep_audio`, and 410 `gone` when a kept file is no longer on disk.
+- `GET /v1/jobs?status=&q=&cursor=&limit=` lists the key's jobs newest first, as `{jobs, cursor}` (`cursor` is null on the last page; `q` matches the title, id or state only). `PATCH /v1/jobs/{id}` with `{"title": "..."}` renames a job and `DELETE /v1/jobs/{id}` deletes it with its result and kept audio.
 - When the app opens after a long time it catches up with `GET /v1/events`. The server cannot push to a phone, so a finished transcript shows the next time the app runs.
+
+### The upload queue
+
+Every finished recording goes into a queue kept on the phone's disk, keyed by its recording id. Each one moves `pending`, `uploading`, `submitted` (the server answered with a job), `done` (the job was read back with `GET /v1/jobs/{id}`). The queue survives an app restart: an upload whose transfer did not survive goes back to `pending` and is sent again with the same key.
+
+- No answer (no network, a dropped connection), 408, 5xx, or a 2xx that is not a job: try again after 5 s, doubling up to 15 minutes. 429: after its `Retry-After`. The queue also runs when the network comes back.
+- `idempotency_conflict` and any other 4xx (a wrong key is 401): the recording is parked with the error and not sent again until the user retries, for example after fixing the key. A recording whose job was deleted before it was read back (404, 410) is parked too, and its file stays.
+- The phone deletes its own file only after reading the job back with `keep_audio: true`, and only when the setting to keep a copy on the phone is off.
