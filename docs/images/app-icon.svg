@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="akou">
+  <!-- akou's app icon (GeiserX/akou assets/brand/akou-app-icon.svg) made full bleed and opaque for iOS,
+       which rounds the corners itself. Render: rsvg-convert -w 1024 -h 1024, then drop the alpha channel. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#212327"/>
+      <stop offset="1" stop-color="#0e1014"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <g transform="translate(512 512) scale(1.2427) translate(-512 -512)">
+    <g fill="none" stroke="#f2f3f5" stroke-width="80" stroke-linecap="round">
+      <circle cx="512" cy="512" r="160"/>
+      <path d="M672 352v320"/>
+    </g>
+    <circle cx="512" cy="512" r="50" fill="#ff453a"/>
+  </g>
+</svg>
