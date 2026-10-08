@@ -15,7 +15,7 @@ import FoundationModels
 struct LastRecordingIntent: AppIntent {
     static var title: LocalizedStringResource { "Last recording summary" }
     static var description: IntentDescription {
-        IntentDescription("Tells you about your latest akou recording: its title, when you made it, how long it is, its workspace and a short summary made on this iPhone.")
+        IntentDescription("Tells you about your latest akou recording: its title, when you made it, how long it is, its workspace and a short summary made on this phone.")
     }
 
     init() {}
