@@ -14,7 +14,7 @@ import WidgetKit
 struct StartRecordingIntent: AudioRecordingIntent, LiveActivityIntent {
     static var title: LocalizedStringResource { "Start recording" }
     static var description: IntentDescription {
-        IntentDescription("Starts an akou recording on this iPhone. It keeps going with the screen locked and shows in a Live Activity.")
+        IntentDescription("Starts an akou recording on this phone. It keeps going with the screen locked and shows in a Live Activity.")
     }
 
     @Parameter(title: "Title")
