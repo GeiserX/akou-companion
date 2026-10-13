@@ -4,16 +4,21 @@ import AkouProtocol
 import Foundation
 import Observation
 
-/// The recordings list: the companion's jobs from the server, newest first, so the list survives a
-/// reinstall, plus the recordings still waiting in the upload queue.
+/// A server's jobs, newest first, read from the server so the list survives a reinstall, plus the
+/// recordings still waiting in the upload queue. With a key that only uploads, the jobs are the
+/// ones this app sent (`metadata.companion == 1`); with one that sees history, every job (Files).
 @MainActor
 @Observable
 final class LibraryStore {
     static let shared = LibraryStore()
 
-    /// The server's jobs this app sent (`metadata.companion == 1`), newest first.
+    /// The server the list is of.
+    private(set) var serverID: UUID?
+    /// Every job (Files), or only the ones this app sent.
+    private(set) var everyJob = false
+    /// The jobs, newest first.
     private(set) var jobs: [Job] = []
-    /// The recordings not on the server yet: waiting, uploading or stopped on a refusal.
+    /// Every recording in the upload queue that has no job yet: waiting, uploading or stopped.
     private(set) var waiting: [UploadQueue.Item] = []
     /// The cursor of the next page; nil once the last page is read.
     private(set) var cursor: Int?
@@ -39,18 +44,25 @@ final class LibraryStore {
         return jobs.filter { $0.metadata?.workspace == workspace }
     }
 
-    /// The client for the saved server and key, or nil when either is missing.
-    static func client() -> JobsClient? {
-        guard let url = ServerSettings.url, let key = KeyStore.load(), !key.isEmpty else { return nil }
-        return JobsClient(baseURL: url, key: key)
+    /// Points the list at `server`, emptying it when that changes what it shows.
+    func show(server: UUID, everyJob: Bool) {
+        guard server != serverID || everyJob != self.everyJob else { return }
+        serverID = server
+        self.everyJob = everyJob
+        jobs = []
+        cursor = nil
+        error = nil
+        workspace = nil
     }
+
+    private func keep(_ job: Job) -> Bool { everyJob || Self.isCompanion(job) }
 
     /// Reads the list again from the first page.
     func refresh() async {
         await loadWaiting()
-        guard !loading else { return }
-        guard let client = Self.client() else {
-            error = "Set the server and the key in Settings."
+        guard !loading, let serverID else { return }
+        guard let client = ServerSettings.jobsClient(serverID) else {
+            error = "Set this server's URL and key in Settings."
             return
         }
         loading = true
@@ -61,15 +73,18 @@ final class LibraryStore {
             var pages = 0
             repeat {
                 let page = try await client.list(cursor: next)
-                fresh += page.jobs.filter(Self.isCompanion)
+                fresh += page.jobs.filter(keep)
                 next = page.cursor
                 pages += 1
             } while next != nil && (fresh.isEmpty || (fresh.count < Self.screenful && pages < Self.pagesPerFill))
+            // The answer of a server the list no longer shows changes nothing.
+            guard serverID == self.serverID else { return }
             jobs = fresh
             cursor = next
             error = nil
-            SnapshotWriter.listRefreshed(jobs)
+            if serverID == ServerSettings.book.recordTo { SnapshotWriter.listRefreshed(jobs.filter(Self.isCompanion)) }
         } catch {
+            guard serverID == self.serverID else { return }
             self.error = Self.describe(error)
         }
     }
@@ -77,15 +92,16 @@ final class LibraryStore {
     /// Reads on from the cursor until a page adds a recording or the last page is read. A page
     /// that adds none would leave the last row unchanged, and its `.task` would never ask again.
     func loadMore() async {
-        guard !loading, cursor != nil, let client = Self.client() else { return }
+        guard !loading, cursor != nil, let serverID, let client = ServerSettings.jobsClient(serverID) else { return }
         loading = true
         defer { loading = false }
         do {
             var added = 0
             while added == 0, let next = cursor {
                 let page = try await client.list(cursor: next)
+                guard serverID == self.serverID else { return }
                 let known = Set(jobs.map(\.id))
-                let fresh = page.jobs.filter { Self.isCompanion($0) && !known.contains($0.id) }
+                let fresh = page.jobs.filter { keep($0) && !known.contains($0.id) }
                 jobs += fresh
                 added = fresh.count
                 cursor = page.cursor
@@ -103,6 +119,16 @@ final class LibraryStore {
             case .pending, .uploading, .parked: true
             case .submitted, .done: false
             }
+        }
+    }
+
+    /// The waiting recordings the Library of `server` shows: its own, those from before several
+    /// servers when it is "Record to", and those whose server was removed, which any server's
+    /// Library offers to take.
+    func waiting(for server: UUID, book: ServerBook) -> [UploadQueue.Item] {
+        waiting.filter { item in
+            if item.waitsForAServer || book.server(item.serverID) == nil && item.serverID != nil { return true }
+            return (item.serverID ?? book.recordTo) == server
         }
     }
 
@@ -124,7 +150,7 @@ final class LibraryStore {
     /// The job was deleted on the server.
     func remove(_ id: String) {
         jobs.removeAll { $0.id == id }
-        SnapshotWriter.listRefreshed(jobs)
+        if serverID == ServerSettings.book.recordTo { SnapshotWriter.listRefreshed(jobs.filter(Self.isCompanion)) }
     }
 
     static func isCompanion(_ job: Job) -> Bool { job.metadata?.companion == 1 }
@@ -133,10 +159,16 @@ final class LibraryStore {
         switch error {
         case JobsClient.Failure.status(401, _, _):
             return "The server refused the key. Check it in Settings."
+        case JobsClient.Failure.status(403, _, _):
+            return "This key cannot see these recordings."
         case let JobsClient.Failure.status(status, body, _):
             return [("HTTP \(status)"), body?.message ?? body?.error].compactMap { $0 }.joined(separator: ": ")
-        case JobsClient.Failure.notAkou:
+        case JobsClient.Failure.notAkou, HistoryClient.Failure.notAkou:
             return "That address did not answer as an akou server."
+        case HistoryClient.Failure.cannotSeeHistory:
+            return "This key cannot see history."
+        case let HistoryClient.Failure.status(status, code, message):
+            return [("HTTP \(status)"), message ?? code].compactMap { $0 }.joined(separator: ": ")
         case let f as Endpoint.Failure:
             return "Refused: \(f). Use https, or plain http only to a private address."
         default:
@@ -153,6 +185,19 @@ final class LibraryStore {
         f.formatOptions = [.withInternetDateTime]
         return f.date(from: iso)
     }
+
+    /// akou writes call and dictation times as epoch milliseconds.
+    static func date(ms: Double?) -> Date? {
+        guard let ms, ms > 0 else { return nil }
+        return Date(timeIntervalSince1970: ms / 1000)
+    }
+}
+
+/// A screen the Library's stack can push, on the server the Library shows.
+enum LibraryRoute: Hashable {
+    case job(String)
+    case call(String)
+    case dictation(String)
 }
 
 /// Where the Library's navigation stands, so a link from the widget
@@ -162,14 +207,18 @@ final class LibraryStore {
 final class LibraryRouter {
     static let shared = LibraryRouter()
 
-    /// The job ids pushed on the Library's stack.
-    var path: [String] = []
+    /// The screens pushed on the Library's stack.
+    var path: [LibraryRoute] = []
+    /// The server the Library shows; nil shows "Record to".
+    var server: UUID?
 
     /// Opens a recording link. True when the link was one; the caller then shows the Library tab.
+    /// The widget shows "Record to"'s recordings, so the Library switches to it.
     @discardableResult
     func open(_ url: URL) -> Bool {
         guard case let .recording(jobId) = DeepLink(url) else { return false }
-        path = [jobId]
+        server = ServerSettings.book.recordTo
+        path = [.job(jobId)]
         return true
     }
 }

@@ -16,4 +16,6 @@ struct FinishedRecording: Identifiable, Codable, Sendable, Equatable {
     let language: String
     /// `auto` or an engine id.
     let model: String
+    /// The server it was recorded for ("Record to" when it started): its upload goes there.
+    var serverID: UUID? = nil
 }

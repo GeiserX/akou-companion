@@ -4,9 +4,9 @@ import Foundation
 import Network
 import UIKit
 
-/// Sends each finished recording to the server once, through a background `URLSession`, so an
-/// upload goes on with the app suspended or the phone locked, and recordings made with no server
-/// in reach go up by themselves when it comes back.
+/// Sends each finished recording once to the server it was recorded for, through a background
+/// `URLSession`, so an upload goes on with the app suspended or the phone locked, and recordings
+/// made with no server in reach go up by themselves when it comes back.
 ///
 /// The decisions live in `UploadQueue` (AkouKit, tested there); this class only runs its
 /// requests: the upload from a body file on the background session, then the read-back of the
@@ -68,9 +68,9 @@ final class BackgroundUploader: NSObject {
         Task { await reconcile() }
     }
 
-    /// Queues a finished recording, under the workspace and language it was recorded with. `file`
-    /// must be inside the app's container.
-    func enqueue(recordingID: String, file: URL, title: String?, workspace: String?, language: String) async {
+    /// Queues a finished recording for `serverID`, under the workspace and language it was
+    /// recorded with. `file` must be inside the app's container.
+    func enqueue(recordingID: String, file: URL, title: String?, workspace: String?, language: String, serverID: UUID?) async {
         start()
         guard let queue else { return }
         let path = file.resolvingSymlinksInPath().path
@@ -82,7 +82,7 @@ final class BackgroundUploader: NSObject {
             language: language,
             workspace: workspace
         )
-        _ = try? await queue.enqueue(submission, fileName: relative)
+        _ = try? await queue.enqueue(submission, fileName: relative, serverID: serverID)
         await pump()
     }
 
@@ -102,6 +102,13 @@ final class BackgroundUploader: NSObject {
     func settingsChanged() async {
         start()
         try? await queue?.retryParked()
+        await pump()
+    }
+
+    /// Sends a recording parked for a removed server (or refused by its own) to `serverID`.
+    func send(_ recordingID: String, to serverID: UUID) async {
+        start()
+        try? await queue?.reassign(recordingID, to: serverID)
         await pump()
     }
 
@@ -140,13 +147,29 @@ final class BackgroundUploader: NSObject {
         await scheduleWake()
     }
 
+    /// One client per server whose URL and key are set and allowed. A server missing here keeps
+    /// its recordings waiting; one removed from the settings parks them (`UploadQueue.Routing`).
+    private func clients() -> (routing: UploadQueue.Routing, clients: [UUID: JobsClient]) {
+        let book = ServerSettings.book
+        var clients: [UUID: JobsClient] = [:]
+        for entry in book.servers {
+            guard let url = entry.baseURL, let key = KeyStore.key(entry.id), !key.isEmpty,
+                  (try? Endpoint.api(url, "/v1/jobs")) != nil else { continue }
+            clients[entry.id] = JobsClient(baseURL: url, key: key)
+        }
+        // Every server the settings hold exists, set up or not: only a removed one parks its
+        // recordings. One without a URL or a key yet keeps them waiting until it has both.
+        let routing = UploadQueue.Routing(servers: Set(book.servers.map(\.id)), recordTo: book.recordTo, ready: Set(clients.keys))
+        return (routing, clients)
+    }
+
     private func pumpOnce() async {
-        guard let queue, let session, let url = ServerSettings.url, let key = KeyStore.load(),
-              (try? Endpoint.api(url, "/v1/jobs")) != nil else { return }
-        let client = JobsClient(baseURL: url, key: key)
-        for item in (try? await queue.claimDue()) ?? [] {
+        guard let queue, let session else { return }
+        let (routing, clients) = clients()
+        for item in (try? await queue.claimDue(routing)) ?? [] {
             let body = Self.bodies.appending(path: "\(item.recordingID).multipart")
             do {
+                guard let client = item.serverID.flatMap({ clients[$0] }) else { throw URLError(.badURL) }
                 let request = try client.submitRequest(item.submission, audio: queue.audioURL(item), bodyFile: body)
                 let task = session.uploadTask(with: request, fromFile: body)
                 task.taskDescription = item.recordingID
@@ -158,8 +181,8 @@ final class BackgroundUploader: NSObject {
         }
         // The read-back needs no wait: `keep_audio` is set when the job is made, and a system
         // wake gives the app about 30 seconds, less than `wait=60` would hold the request.
-        for (recordingID, jobID) in await queue.dueForConfirm() {
-            guard let request = try? client.jobRequest(jobID) else { continue }
+        for (recordingID, jobID, serverID) in (try? await queue.dueForConfirm(routing)) ?? [] {
+            guard let request = try? serverID.flatMap({ clients[$0] })?.jobRequest(jobID) else { continue }
             let answer = await URLSessionTransport().send(request)
             try? await queue.confirmEnded(recordingID, answer)
         }

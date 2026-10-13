@@ -40,9 +40,12 @@ final class RecordingController: ObservableObject {
 
     /// Called on the main actor with every recording that stops.
     var onFinished: ((FinishedRecording) -> Void)?
-    /// The server key, supplied by the settings, which keep it in the Keychain. Nil records
-    /// without live text.
-    var serverKey: () -> String? = { nil }
+    /// "Record to", supplied by the settings, which keep its key in the Keychain: live text goes
+    /// there and the recording is uploaded there. Nil records without live text.
+    var recordTarget: () -> RecordTarget? = { nil }
+    /// The "Record to" server's id even when its URL or key is missing, so the recording is still
+    /// queued for it and goes up once the settings are complete.
+    var recordToID: () -> UUID? = { nil }
     /// Where the samples come from: the microphone, or a file in the app's tests.
     var makeSource: (@escaping @Sendable ([Float]) -> Void) -> any SampleSource = { AudioCapture(sink: $0) }
     var requestPermission: () async -> Bool = { await AVAudioApplication.requestRecordPermission() }
@@ -57,6 +60,8 @@ final class RecordingController: ObservableObject {
         let title: String?
         let language: String
         let model: String
+        /// The server it was recorded for.
+        let serverID: UUID?
         var forwarder: Task<Void, Never>
         var listener: Task<Void, Never>?
     }
@@ -88,14 +93,16 @@ final class RecordingController: ObservableObject {
         // An emptied language or model field means auto, as the upload reads it.
         let language = ServerSettings.language
         let model = ServerSettings.model
-        let live = makeLiveSession(file: file, language: language, model: model)
+        let target = recordTarget()
+        let live = makeLiveSession(target, file: file, language: language, model: model)
         let forwarder = Task {
             for await page in file.pages { await live?.send(page: page.data, endsAt: page.end) }
         }
         let now = Date()
         current = Current(
             id: id, file: file, capture: capture, live: live, startedAt: now,
-            workspace: workspace, title: title, language: language, model: model, forwarder: forwarder
+            workspace: workspace, title: title, language: language, model: model,
+            serverID: target?.id ?? recordToID(), forwarder: forwarder
         )
         transcript = LiveTranscript()
         lastError = nil
@@ -171,7 +178,8 @@ final class RecordingController: ObservableObject {
         lastError = error
         let finished = FinishedRecording(
             id: rec.id, fileURL: rec.file.url, startedAt: rec.startedAt, duration: seconds,
-            workspace: rec.workspace, title: rec.title, language: rec.language, model: rec.model
+            workspace: rec.workspace, title: rec.title, language: rec.language, model: rec.model,
+            serverID: rec.serverID
         )
         state = .idle
         RecordingStatus.set(recording: false)
@@ -179,13 +187,10 @@ final class RecordingController: ObservableObject {
         return finished
     }
 
-    private func makeLiveSession(file: RecordingFile, language: String, model: String) -> LiveSession? {
-        guard serverSupportsLive != false,
-              let raw = UserDefaults.standard.string(forKey: "serverURL"),
-              let base = URL(string: raw.trimmingCharacters(in: .whitespaces)),
-              let key = serverKey(), !key.isEmpty else { return nil }
+    private func makeLiveSession(_ target: RecordTarget?, file: RecordingFile, language: String, model: String) -> LiveSession? {
+        guard serverSupportsLive != false, let target else { return nil }
         return LiveSession(
-            baseURL: base, key: key, hello: LiveHello(language: language, model: model), headerPages: file.headerPages
+            baseURL: target.url, key: target.key, hello: LiveHello(language: language, model: model), headerPages: file.headerPages
         )
     }
 

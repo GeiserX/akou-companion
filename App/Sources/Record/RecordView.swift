@@ -9,7 +9,8 @@ struct RecordView: View {
     @ObservedObject private var recorder = RecordingController.shared
     @AppStorage("workspaces") private var workspacesJSON = "[]"
     @AppStorage("defaultWorkspace") private var defaultWorkspace = ""
-    @AppStorage("serverURL") private var serverURL = ""
+    /// The servers, so a change of "Record to" or of its URL checks again.
+    @AppStorage(ServerBook.defaultsKey) private var bookJSON = ""
     @State private var workspace = ""
     @State private var serverNote: String?
     @State private var error: String?
@@ -63,7 +64,7 @@ struct RecordView: View {
         .padding()
         .navigationTitle("Record")
         .onAppear { if workspace.isEmpty, workspaces.contains(defaultWorkspace) { workspace = defaultWorkspace } }
-        .task(id: serverURL) { await checkServer() }
+        .task(id: bookJSON) { await checkServer() }
     }
 
     private var isRecording: Bool {
@@ -100,16 +101,15 @@ struct RecordView: View {
         }
     }
 
-    /// Whether this server shows live text, so the screen can say so before recording.
+    /// Whether "Record to" shows live text, so the screen can say so before recording.
     private func checkServer() async {
-        let trimmed = serverURL.trimmingCharacters(in: .whitespaces)
-        guard let url = URL(string: trimmed), !trimmed.isEmpty, let key = recorder.serverKey(), !key.isEmpty else {
+        guard let target = recorder.recordTarget() else {
             recorder.serverSupportsLive = nil
-            serverNote = "No server set: recordings stay on the phone, without live text."
+            serverNote = "No server to record to: recordings stay on the phone, without live text."
             return
         }
         do {
-            let info = try await ServerProbe(baseURL: url, key: key).server()
+            let info = try await ServerProbe(baseURL: target.url, key: target.key).server()
             recorder.serverSupportsLive = info.supportsLive
             serverNote = info.supportsLive ? nil : "No live text on this server: the app records, and the transcript comes after the upload."
         } catch {

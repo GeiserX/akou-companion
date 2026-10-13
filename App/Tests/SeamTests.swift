@@ -8,39 +8,73 @@ import XCTest
 /// They run inside the app, so `AkouCompanionApp.init` has already connected them.
 @MainActor
 final class SeamTests: XCTestCase {
-    private var savedKey: String?
-    private var savedURL: String?
+    private var savedBook: String?
     private var savedWorkspace: String?
+    /// Servers a test made, whose keys go when it ends.
+    private var made: [UUID] = []
 
     override func setUp() async throws {
-        savedKey = KeyStore.load()
-        savedURL = UserDefaults.standard.string(forKey: ServerSettings.serverURL)
+        savedBook = UserDefaults.standard.string(forKey: ServerBook.defaultsKey)
         savedWorkspace = UserDefaults.standard.string(forKey: ServerSettings.defaultWorkspace)
     }
 
     override func tearDown() async throws {
         await RecordingController.shared.stop()
-        if let savedKey { KeyStore.save(savedKey) } else { KeyStore.delete() }
-        UserDefaults.standard.set(savedURL, forKey: ServerSettings.serverURL)
+        for id in made { KeyStore.delete(server: id) }
+        UserDefaults.standard.set(savedBook, forKey: ServerBook.defaultsKey)
         UserDefaults.standard.set(savedWorkspace, forKey: ServerSettings.defaultWorkspace)
+    }
+
+    /// Sets the server list to `servers`, the first one "Record to", each with its key when given.
+    private func useServers(_ servers: [(ServerEntry, String?)]) {
+        for (s, key) in servers {
+            made.append(s.id)
+            if let key { XCTAssertTrue(KeyStore.save(key, server: s.id), "the Keychain refused the key") } else { KeyStore.delete(server: s.id) }
+        }
+        ServerSettings.save(ServerBook(servers: servers.map(\.0), recordTo: servers.first?.0.id))
     }
 
     func testLaunchHandsTheRecorderToTheRecordIntents() {
         XCTAssertTrue(RecordIntentHost.recorder === RecordingController.shared)
     }
 
-    func testTheRecorderReadsTheKeyTheSettingsKeepInTheKeychain() {
-        XCTAssertTrue(KeyStore.save("ak_wiring_test"), "the Keychain refused the key")
-        XCTAssertEqual(RecordingController.shared.serverKey(), "ak_wiring_test")
+    func testTheRecorderUsesRecordToAndItsKeyFromTheKeychain() {
+        let home = ServerEntry(name: "home", url: "https://home.example.com")
+        let office = ServerEntry(name: "office", url: "https://office.example.com")
+        useServers([(home, "ak_wiring_home"), (office, "ak_wiring_office")])
+        XCTAssertEqual(RecordingController.shared.recordTarget(), RecordTarget(id: home.id, url: URL(string: "https://home.example.com")!, key: "ak_wiring_home"))
+        var book = ServerSettings.book
+        book.recordTo = office.id
+        ServerSettings.save(book)
+        XCTAssertEqual(RecordingController.shared.recordTarget()?.key, "ak_wiring_office", "each server has its own Keychain entry")
         let stored = UserDefaults.standard.dictionaryRepresentation().values.compactMap { $0 as? String }
-        XCTAssertFalse(stored.contains { $0.contains("ak_wiring_test") }, "the key is never in UserDefaults")
-        KeyStore.delete()
-        XCTAssertNil(RecordingController.shared.serverKey())
+        XCTAssertFalse(stored.contains { $0.contains("ak_wiring_") }, "a key is never in UserDefaults")
+        KeyStore.delete(server: office.id)
+        XCTAssertNil(RecordingController.shared.recordTarget(), "no key: no live text")
+        XCTAssertEqual(RecordingController.shared.recordToID(), office.id, "but the recording is still for Record to")
+    }
+
+    /// The single server of earlier versions, as the Keychain and UserDefaults held it, becomes
+    /// the first server on the real Keychain.
+    func testTheOldSingleServerMovesIntoTheKeychainUnderItsNewId() throws {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: ServerBook.defaultsKey)
+        defaults.set("https://old.example.com", forKey: ServerMigration.legacyURLKey)
+        XCTAssertTrue(KeyStore.shared.save("ak_wiring_old", account: ServerMigration.legacyAccount))
+        let book = ServerSettings.book
+        made += book.servers.map(\.id)
+        let server = try XCTUnwrap(book.recordToServer)
+        XCTAssertEqual(server.name, "old.example.com")
+        XCTAssertEqual(KeyStore.key(server.id), "ak_wiring_old")
+        XCTAssertNil(KeyStore.shared.load(account: ServerMigration.legacyAccount), "the old entry is gone")
+        XCTAssertNil(defaults.object(forKey: ServerMigration.legacyURLKey))
     }
 
     func testEveryStartAndStopReachesTheRecordControlAndTheUploadQueue() async throws {
         let recorder = RecordingController.shared
-        KeyStore.delete() // no key: no live text, and the upload waits in the queue
+        // "Record to" without a key: no live text, and the upload waits in the queue for it.
+        let server = ServerEntry(name: "seam", url: "https://seam.example.com")
+        useServers([(server, nil)])
         UserDefaults.standard.set("intent-default", forKey: ServerSettings.defaultWorkspace)
         recorder.requestPermission = { true }
         recorder.makeSource = { FileSampleSource(samples: [Float](repeating: 0, count: 16000), sink: $0) }
@@ -58,6 +92,7 @@ final class SeamTests: XCTestCase {
         let queued = try await waitForQueued(title: title)
         XCTAssertEqual(queued.submission.workspace, "intent-default", "an intent records into the settings' workspace")
         XCTAssertTrue(queued.submission.keepAudio)
+        XCTAssertEqual(queued.serverID, server.id, "the recording is queued for the server it was recorded for")
 
         // The record screen path, straight to the controller, in the workspace picked there.
         try await recorder.start(workspace: "screen", title: title + "-screen")
@@ -68,13 +103,19 @@ final class SeamTests: XCTestCase {
         XCTAssertFalse(RecordingStatus.isRecording)
         let screen = try await waitForQueued(title: title + "-screen")
         XCTAssertEqual(screen.submission.workspace, "screen", "the upload keeps the workspace the recording was made in")
+        XCTAssertEqual(screen.serverID, server.id)
     }
 
     func testLinksOpenTheirTab() {
         XCTAssertEqual(AkouCompanionApp.screen(for: URL(string: "akou-companion://record")!), .record)
         LibraryRouter.shared.path = []
+        let other = ServerEntry(name: "other", url: "https://other.example.com")
+        let recordTo = ServerEntry(name: "rec", url: "https://rec.example.com")
+        useServers([(recordTo, nil), (other, nil)])
+        LibraryRouter.shared.server = other.id
         XCTAssertEqual(AkouCompanionApp.screen(for: URL(string: "akou-companion://recording/job_01ABC")!), .library)
-        XCTAssertEqual(LibraryRouter.shared.path, ["job_01ABC"])
+        XCTAssertEqual(LibraryRouter.shared.path, [.job("job_01ABC")])
+        XCTAssertEqual(LibraryRouter.shared.server, recordTo.id, "the widget shows Record to, so its link opens Record to")
         XCTAssertNil(AkouCompanionApp.screen(for: URL(string: "akou-companion://recording/")!))
         XCTAssertNil(AkouCompanionApp.screen(for: URL(string: "https://example.com/record")!))
     }

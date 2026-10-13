@@ -3,9 +3,10 @@ import AkouClient
 import AkouProtocol
 import SwiftUI
 
-/// One recording: its player, its final transcript with every timed word a button that seeks the
-/// player there, and rename and delete, which go to the server.
+/// One job: its player, its final transcript with every timed word a button that seeks the
+/// player there, and rename and delete, which go to the server when the key may change jobs.
 struct RecordingDetailView: View {
+    let serverID: UUID
     let jobId: String
 
     @State private var job: Job?
@@ -38,17 +39,19 @@ struct RecordingDetailView: View {
         .navigationTitle(job?.title ?? "Recording")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button("Rename", systemImage: "pencil") {
-                        newTitle = job?.title ?? ""
-                        renaming = true
+            if canChange {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button("Rename", systemImage: "pencil") {
+                            newTitle = job?.title ?? ""
+                            renaming = true
+                        }
+                        Button("Delete", systemImage: "trash", role: .destructive) { confirmingDelete = true }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
                     }
-                    Button("Delete", systemImage: "trash", role: .destructive) { confirmingDelete = true }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
+                    .disabled(job == nil)
                 }
-                .disabled(job == nil)
             }
         }
         .alert("Rename", isPresented: $renaming) {
@@ -65,6 +68,11 @@ struct RecordingDetailView: View {
         .onDisappear { player.stop() }
     }
 
+    /// Rename and delete need a key that writes jobs; a `read` key only looks.
+    private var canChange: Bool { ServerSettings.book.server(serverID)?.tested?.canUpload ?? true }
+
+    private var isRecordTo: Bool { ServerSettings.book.recordTo == serverID }
+
     private var deleteMessage: String {
         if job?.keepAudio == true {
             return "This deletes the transcript and the audio the server kept. A copy on this iPhone, if there is one, stays."
@@ -73,8 +81,8 @@ struct RecordingDetailView: View {
     }
 
     private func load() async {
-        guard let client = LibraryStore.client() else {
-            status = "Set the server and the key in Settings."
+        guard let client = ServerSettings.jobsClient(serverID) else {
+            status = "Set this server's URL and key in Settings."
             return
         }
         do {
@@ -100,7 +108,7 @@ struct RecordingDetailView: View {
                 do {
                     let result = try await client.result(jobId)
                     self.result = result
-                    SnapshotWriter.transcriptLoaded(job: job, result: result)
+                    if isRecordTo && LibraryStore.isCompanion(job) { SnapshotWriter.transcriptLoaded(job: job, result: result) }
                     return
                 } catch JobsClient.Failure.status(409, _, _) {
                     // `not_done` for a job that read as done: the result is being written. Ask again shortly.
@@ -116,7 +124,7 @@ struct RecordingDetailView: View {
 
     private func rename() async {
         let title = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty, let client = LibraryStore.client() else { return }
+        guard !title.isEmpty, let client = ServerSettings.jobsClient(serverID) else { return }
         do {
             let job = try await client.rename(jobId, title: title)
             self.job = job
@@ -128,7 +136,7 @@ struct RecordingDetailView: View {
     }
 
     private func delete() async {
-        guard let client = LibraryStore.client() else { return }
+        guard let client = ServerSettings.jobsClient(serverID) else { return }
         do {
             try await client.delete(jobId)
             player.stop()
@@ -140,7 +148,7 @@ struct RecordingDetailView: View {
     }
 }
 
-private struct PlayerBar: View {
+struct PlayerBar: View {
     let player: RecordingPlayer
 
     var body: some View {
@@ -161,7 +169,7 @@ private struct PlayerBar: View {
                 Spacer()
                 Image(systemName: player.source == .server ? "icloud" : "iphone")
                     .foregroundStyle(.secondary)
-                    .accessibilityLabel(player.source == .server ? "Playing from the server" : "Playing the copy on this iPhone")
+                    .accessibilityLabel(player.source == .server ? "Playing from the server" : "Playing the copy on this phone")
             }
         }
     }
