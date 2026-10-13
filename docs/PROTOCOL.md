@@ -117,7 +117,7 @@ A key with the `read` or `admin` scope may read everything an akou holds; `GET /
 
 - `GET /v1/calls?limit=200`: `{calls}`, newest first, each `{id, title, workspace, createdAt, state, endedAt, parts, updatedAt}`. Times are epoch milliseconds.
 - `GET /v1/calls/{id}`: the call with its `parts` (`{part, wallStart, ended: {fileSeconds}}`), `tz` and the `final` pass.
-- `GET /v1/calls/{id}/transcript?layer=best&format=json&review=skip`: `{zone, lines}`, each line `{id, time, w0, w1, part, ch, spk, speaker, text}`: its local time, its start and end in epoch ms, its part and its speaker's name. A line is `(w0 - wallStart) / 1000` seconds into its part's audio.
+- `GET /v1/calls/{id}/transcript?layer=best&format=json&review=skip`: `{zone, lines}`, each line `{id, time, w0, w1, a0, a1, part, ch, spk, speaker, text}`: its local time, its start and end in epoch ms, its start and end in seconds into its part's audio (`a0`, `a1`), its part and its speaker's name. The phone plays a line from `a0`; an akou older than `a0` gets `(w0 - wallStart) / 1000`, which is right only for a part that never paused.
 - `GET /v1/calls/{id}/enhanced`: `{enhanced}`, the summary as Markdown (`{rev, template, markdown}`), or null when the call has none.
 - `GET /v1/calls/{id}/notes`: `{notes}`, the notepad lines `{id, text, w, author}`.
 - `GET /v1/calls/{id}/audio/{part}`: the part's audio, Ogg Opus at 48 kHz stereo (the microphone left, the call right), with `Range`.
