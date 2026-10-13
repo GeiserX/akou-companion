@@ -19,6 +19,8 @@ final class FakeAkouHTTP: URLProtocol, @unchecked Sendable {
 
     struct Seen {
         var method: String
+        /// Which server was asked: the routing tests run two on one fake.
+        var host: String?
         var path: String
         var query: String?
         var headers: [String: String]
@@ -69,7 +71,7 @@ final class FakeAkouHTTP: URLProtocol, @unchecked Sendable {
         var headers: [String: String] = [:]
         for (k, v) in request.allHTTPHeaderFields ?? [:] { headers[k.lowercased()] = v }
         let body = Self.body(of: request)
-        var seen = Seen(method: method, path: url.path, query: url.query, headers: headers, fields: [:])
+        var seen = Seen(method: method, host: url.host, path: url.path, query: url.query, headers: headers, fields: [:])
         if let type = headers["content-type"], type.hasPrefix("multipart/form-data"),
            let boundary = type.components(separatedBy: "boundary=").last {
             let parts = Self.parts(body, boundary: boundary)

@@ -5,13 +5,17 @@ import AVFoundation
 import Foundation
 import UniformTypeIdentifiers
 
-/// Plays a kept job's audio from the server without putting the key in a URL.
+/// Plays audio from an akou server without putting the key in a URL: a kept job's audio, a call's
+/// part, a dictation.
 ///
 /// AVPlayer cannot add a header to the requests it makes, and akou takes the key only as
-/// `Authorization: Bearer`. So the player is given `akou-audio://<jobId>`, a scheme it does not
-/// know, and asks this loader for the bytes; the loader asks `GET /v1/jobs/{id}/audio` with the
-/// header and a `Range` for exactly the bytes the player wants, and answers the player's content
-/// information (type, length, seekable) from the server's 206 `Content-Range` and `Content-Type`.
+/// `Authorization: Bearer`. So the player is given `akou-audio://akou/<api path>`, a scheme it does
+/// not know, and asks this loader for the bytes; the loader asks that path on the loader's server
+/// with the header and a `Range` for exactly the bytes the player wants, and answers the player's
+/// content information (type, length, seekable) from the server's 206 `Content-Range` and
+/// `Content-Type`. A route that ignores `Range` (a dictation's audio) answers 200 with the whole
+/// file, and the loader passes on only the bytes asked for. The URL carries the path and nothing
+/// else; which server it is on is the loader's, one loader per server.
 ///
 /// akou answers 409 `not_kept` for a job uploaded without `keep_audio` and 410 `gone` for a deleted
 /// one or a kept file no longer on disk; both reach `onFailure` as typed errors, and fail the player
@@ -26,47 +30,60 @@ public final class AuthorizedAudioLoader: NSObject, AVAssetResourceLoaderDelegat
         case gone
         /// Any other answer outside 2xx, with akou's error code when the body carried one.
         case status(Int, code: String?)
-        /// The URL handed to the loader is not `akou-audio://<jobId>`.
+        /// The URL handed to the loader is not `akou-audio://akou/<path>`.
         case notAudioURL
+        /// The server sent audio in a format AVFoundation does not play (WebM), with its MIME type.
+        case unplayable(String)
     }
 
-    /// The URL to give AVPlayer for a job: `akou-audio://<jobId>`. It carries the job id and nothing else.
-    public static func url(jobId: String) -> URL {
+    /// The URL to give AVPlayer for an API path such as `/v1/calls/{id}/audio/1`. It carries the
+    /// path and nothing else: never the key, never the server.
+    public static func url(path: String) -> URL {
         var c = URLComponents()
         c.scheme = scheme
-        c.host = jobId
+        c.host = "akou"
+        c.path = path.hasPrefix("/") ? path : "/" + path
         return c.url!
     }
 
-    /// The job id in an `akou-audio://<jobId>` URL, or nil for any other URL.
-    public static func jobId(in url: URL) -> String? {
-        guard url.scheme == scheme, let host = url.host(percentEncoded: false), !host.isEmpty else { return nil }
-        return host
+    /// A kept job's audio: `akou-audio://akou/v1/jobs/{id}/audio`.
+    public static func url(jobId: String) -> URL { url(path: JobsClient.audioPath(jobId)) }
+
+    /// The API path in an `akou-audio://akou/<path>` URL, or nil for any other URL. Only paths
+    /// under `/v1/` pass, so the loader never asks the server for anything but its API.
+    public static func path(in url: URL) -> String? {
+        guard url.scheme == scheme, url.host(percentEncoded: false) == "akou" else { return nil }
+        let p = url.path(percentEncoded: false)
+        guard p.hasPrefix("/v1/"), !p.split(separator: "/").contains("..") else { return nil }
+        return p
     }
 
-    /// Called on the loader's queue when the server refuses a job's audio.
-    public var onFailure: (@Sendable (_ jobId: String, _ failure: Failure) -> Void)?
+    /// Called on the loader's queue when the server refuses a path's audio.
+    public var onFailure: (@Sendable (_ path: String, _ failure: Failure) -> Void)?
 
     private let session: URLSession
     private let makeRequest: @Sendable (String) throws -> URLRequest
     let queue = DispatchQueue(label: "akou.audio-loader")
     private var fetches: [ObjectIdentifier: RangeFetch] = [:]
 
-    /// - Parameter makeRequest: builds the plain `GET /v1/jobs/{id}/audio` request for a job id,
-    ///   with the `Authorization` header (the app passes `JobsClient.audioRequest`). The loader adds
-    ///   the `Range` header to it.
+    /// - Parameter makeRequest: builds the plain `GET` request for an API path on the loader's
+    ///   server, with the `Authorization` header (the app passes `audioRequest(path:)` of its
+    ///   `JobsClient` or `HistoryClient`). The loader adds the `Range` header to it.
     public init(session: URLSession = AkouSession.shared, makeRequest: @escaping @Sendable (String) throws -> URLRequest) {
         self.session = session
         self.makeRequest = makeRequest
     }
 
-    /// An asset for a job's server audio, answered by this loader. Keep the loader alive as long
-    /// as the asset: AVFoundation holds its resource loader's delegate weakly.
-    public func asset(jobId: String) -> AVURLAsset {
-        let asset = AVURLAsset(url: Self.url(jobId: jobId))
+    /// An asset for an audio path on the loader's server, answered by this loader. Keep the loader
+    /// alive as long as the asset: AVFoundation holds its resource loader's delegate weakly.
+    public func asset(path: String) -> AVURLAsset {
+        let asset = AVURLAsset(url: Self.url(path: path))
         asset.resourceLoader.setDelegate(self, queue: queue)
         return asset
     }
+
+    /// An asset for a kept job's audio.
+    public func asset(jobId: String) -> AVURLAsset { asset(path: JobsClient.audioPath(jobId)) }
 
     // MARK: AVAssetResourceLoaderDelegate (called on `queue`)
 
@@ -86,13 +103,13 @@ public final class AuthorizedAudioLoader: NSObject, AVAssetResourceLoaderDelegat
     /// Starts answering one loading request. Must run on `queue`. False when the URL is not ours.
     @discardableResult
     func start(_ request: some AudioLoadingRequest) -> Bool {
-        guard let jobId = request.url.flatMap(Self.jobId(in:)) else {
+        guard let path = request.url.flatMap(Self.path(in:)) else {
             request.finish(Failure.notAudioURL)
             return false
         }
         let urlRequest: URLRequest
         do {
-            urlRequest = try makeRequest(jobId)
+            urlRequest = try makeRequest(path)
         } catch {
             request.finish(error)
             return false
@@ -101,7 +118,7 @@ public final class AuthorizedAudioLoader: NSObject, AVAssetResourceLoaderDelegat
         let fetch = RangeFetch(request: request, queue: queue) { [weak self] failure in
             guard let self else { return }
             self.fetches.removeValue(forKey: key)
-            if let failure { self.onFailure?(jobId, failure) }
+            if let failure { self.onFailure?(path, failure) }
         }
         fetches[key] = fetch
         fetch.start(urlRequest, session: session)
@@ -137,6 +154,13 @@ public final class AuthorizedAudioLoader: NSObject, AVAssetResourceLoaderDelegat
             return oggType
         }
         return UTType(mimeType: m)?.identifier ?? oggType
+    }
+
+    /// False for a MIME type AVFoundation cannot play on iOS: WebM (akou serves a job's upload byte
+    /// for byte, so a browser's recording comes back as `audio/webm`).
+    static func playable(mime: String?) -> Bool {
+        let m = (mime ?? "").lowercased()
+        return !(m == "audio/webm" || m == "video/webm")
     }
 
     /// The type Core Audio files Ogg under (`AVURLAsset.audiovisualTypes()` lists it).
@@ -277,6 +301,10 @@ final class RangeFetch: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         let http = response as? HTTPURLResponse
         status = http?.statusCode ?? 0
         guard (200..<300).contains(status) else { return }
+        if !AuthorizedAudioLoader.playable(mime: response.mimeType) {
+            let f = AuthorizedAudioLoader.Failure.unplayable(response.mimeType ?? "")
+            return finish(f, failure: f)
+        }
         var length = response.expectedContentLength
         var first: Int64 = 0
         if status == 206, let cr = http?.value(forHTTPHeaderField: "Content-Range"),

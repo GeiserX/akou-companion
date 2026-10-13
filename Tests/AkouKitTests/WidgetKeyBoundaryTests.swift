@@ -11,7 +11,7 @@ final class WidgetKeyBoundaryTests: XCTestCase {
         .appending(path: "App")
 
     /// What reads the key or speaks to the server with it.
-    static let forbidden = ["KeyStore", "SecItem", "kSecClass", "Authorization", "JobsClient", "LiveSession", "LiveClient", "ServerProbe", "BackgroundUploader"]
+    static let forbidden = ["KeyStore", "SecItem", "kSecClass", "Authorization", "JobsClient", "HistoryClient", "LiveSession", "LiveClient", "ServerProbe", "BackgroundUploader"]
 
     func testNothingTheWidgetExtensionCompilesTouchesTheKey() throws {
         // The extension compiles Widgets/ and Shared/, and nothing else.

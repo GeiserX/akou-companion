@@ -6,7 +6,8 @@ import Foundation
 public struct ServerInfo: Decodable, Sendable, Equatable {
     public var name: String
     public var version: String?
-    /// `server` on a server, `app` on a desktop app (which a phone cannot reach).
+    /// `server` on a server, `app` on a desktop app (reachable by key when its network listener is
+    /// on). Calls and dictations exist only in `app` mode.
     public var mode: String?
     public var capabilities: Capabilities
     /// The live door in server mode: the streaming models on disk a `hello` may name. Null in the
