@@ -20,6 +20,7 @@ Status: early. This repository holds AkouKit (the tested core) and the app's rec
 - M2, locked-screen recording, Action button, Live Activity, offline queue: in progress
 - M3, the server as the library, a last-recording summary and a recent-recordings widget: in progress
 - M4, QR pairing and the Apple Watch: planned ([docs/M4.md](docs/M4.md))
+- M5, several servers and each one's history (calls, dictations, files) as far as its key allows: in progress
 
 ## Features
 
@@ -34,7 +35,7 @@ What is built today, in AkouKit:
 - Playback of a recording's audio kept on the server, streamed with `Range` requests that carry the key in a header, never in a URL
 - The `https`-or-private-address rule for where audio and the key may go
 
-In the app: a record screen with a workspace per recording, the elapsed time and the live text, recording into `Application Support/Recordings/<id>.opus`, pausing for a call or Siri and resuming into the same file, and the Live Activity. A Recordings tab lists this app's recordings from the server, by workspace, with the final transcript (tap a word to play from there), playback, rename and delete.
+In the app: a record screen with a workspace per recording, the elapsed time and the live text, recording into `Application Support/Recordings/<id>.opus`, pausing for a call or Siri and resuming into the same file, and the Live Activity. A Recordings tab lists this app's recordings from the server, by workspace, with the final transcript (tap a word to play from there), playback, rename and delete. The app connects to several akou servers, each with its own key, and records to one of them; with a key that reads history, the Recordings tab shows that akou's calls, dictations and files like the desktop app.
 
 What comes next, milestone by milestone: recording on a locked phone, one press from the Action button, and the Apple Watch.
 
