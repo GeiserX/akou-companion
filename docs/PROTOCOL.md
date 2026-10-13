@@ -109,3 +109,20 @@ Every finished recording goes into a queue kept on the phone's disk, keyed by it
 - No answer (no network, a dropped connection), 408, 5xx, or a 2xx that is not a job: try again after 5 s, doubling up to 15 minutes. 429: after its `Retry-After`. The queue also runs when the network comes back.
 - `idempotency_conflict` and any other 4xx (a wrong key is 401): the recording is parked with the error and not sent again until the user retries, for example after fixing the key. A recording whose job was deleted before it was read back (404, 410) is parked too, and its file stays.
 - The phone deletes its own file only after reading the job back with `keep_audio: true`, and only when the setting to keep a copy on the phone is off.
+- Each recording goes to the server it was recorded for: "Record to" when it started. A recording queued before the phone knew several servers names none and goes to "Record to", which is then written into it. A recording whose server was removed is parked with `server_removed` and keeps its file until it is sent to another server; a server with no key yet keeps its recordings waiting.
+
+## Reading an akou's history
+
+A key with the `read` or `admin` scope may read everything an akou holds; `GET /v1/keys/me` says which scopes the key has, whatever they are. `jobs` uploads, `read` reads and writes nothing, `admin` does both. Calls and dictations exist only on a desktop akou (`mode` `app` in `GET /v1/server`), reached by key over its network listener; a server has jobs only. The phone reads, never writes, these routes:
+
+- `GET /v1/calls?limit=200`: `{calls}`, newest first, each `{id, title, workspace, createdAt, state, endedAt, parts, updatedAt}`. Times are epoch milliseconds.
+- `GET /v1/calls/{id}`: the call with its `parts` (`{part, wallStart, ended: {fileSeconds}}`), `tz` and the `final` pass.
+- `GET /v1/calls/{id}/transcript?layer=best&format=json&review=skip`: `{zone, lines}`, each line `{id, time, w0, w1, a0, a1, part, ch, spk, speaker, text}`: its local time, its start and end in epoch ms, its start and end in seconds into its part's audio (`a0`, `a1`), its part and its speaker's name. The phone plays a line from `a0`; an akou older than `a0` gets `(w0 - wallStart) / 1000`, which is right only for a part that never paused.
+- `GET /v1/calls/{id}/enhanced`: `{enhanced}`, the summary as Markdown (`{rev, template, markdown}`), or null when the call has none.
+- `GET /v1/calls/{id}/notes`: `{notes}`, the notepad lines `{id, text, w, author}`.
+- `GET /v1/calls/{id}/audio/{part}`: the part's audio, Ogg Opus at 48 kHz stereo (the microphone left, the call right), with `Range`.
+- `GET /v1/dictations?limit=50&cursor=`: `{items, next_cursor}`, each `{id, at, state, app_name, seconds, text, raw, language, words, engine, model}`; `next_cursor` is null on the last page.
+- `GET /v1/dictations/{id}` and `GET /v1/dictations/{id}/audio`: the audio is Ogg Opus (a WAV for one kept before akou kept Opus), sent whole without `Range`, and 404 `no_audio` when none was kept.
+- `GET /v1/jobs`: with `read` or `admin`, every key's jobs, each with its result at `GET /v1/jobs/{id}/result` and its kept audio at `GET /v1/jobs/{id}/audio`. That audio is the upload byte for byte; a WebM file (`audio/webm`) cannot play on iOS, so the phone says so instead of trying.
+
+A history route answers 401 for a wrong key and 403 `forbidden` for a key whose scope does not reach it. The phone shows "This key cannot see history" for either and does not retry.

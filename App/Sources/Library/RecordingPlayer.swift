@@ -5,8 +5,9 @@ import Foundation
 import Observation
 
 /// Plays one recording: the phone's own file when it still has one (the "keep a copy" setting, or
-/// not uploaded yet), else the server's kept audio through `AuthorizedAudioLoader`, which sends
-/// the key as a header and asks for byte ranges, so seeking does not download the whole file.
+/// not uploaded yet), else audio on a server (a job's kept audio, a call's part, a dictation)
+/// through `AuthorizedAudioLoader`, which sends the key as a header and asks for byte ranges, so
+/// seeking does not download the whole file.
 @MainActor
 @Observable
 final class RecordingPlayer {
@@ -28,26 +29,42 @@ final class RecordingPlayer {
     /// Held for as long as the player: AVFoundation keeps its resource loader's delegate weakly.
     @ObservationIgnored private var loader: AuthorizedAudioLoader?
     @ObservationIgnored private var timeObserver: Any?
+    /// A seek asked for before the item could play, made once it can.
+    @ObservationIgnored private var pendingSeek: Double?
     @ObservationIgnored private var statusObservation: NSKeyValueObservation?
 
     /// Sets up the player for a job. `local` is the phone's copy when it has one.
     func load(jobId: String, keptOnServer: Bool, local: URL?, client: JobsClient?) {
+        var request: (@Sendable (String) throws -> URLRequest)?
+        if let client {
+            request = { path in try client.audioRequest(path: path) }
+        }
+        let missing = keptOnServer
+            ? "Set this server's URL and key in Settings."
+            : "The server did not keep this recording's audio, and this phone has no copy."
+        load(path: keptOnServer ? JobsClient.audioPath(jobId) : nil, local: local, request: request, missing: missing)
+    }
+
+    /// Sets up the player for an audio `path` on a server, answered with `request` (the server's
+    /// client's `audioRequest(path:)`), or the phone's `local` copy when it has one. `missing` says
+    /// why nothing plays when there is neither.
+    func load(path: String?, local: URL? = nil, request: (@Sendable (String) throws -> URLRequest)?, missing: String) {
         stop()
         let item: AVPlayerItem
         if let local, FileManager.default.fileExists(atPath: local.path) {
             source = .local(local)
             item = AVPlayerItem(url: local)
-        } else if keptOnServer, let client {
+        } else if let path, let request {
             source = .server
-            let loader = AuthorizedAudioLoader { id in try client.audioRequest(id) }
+            let loader = AuthorizedAudioLoader(makeRequest: request)
             loader.onFailure = { _, failure in
                 Task { @MainActor [weak self] in self?.problem = Self.describe(failure) }
             }
             self.loader = loader
-            item = AVPlayerItem(asset: loader.asset(jobId: jobId))
+            item = AVPlayerItem(asset: loader.asset(path: path))
         } else {
             source = .none
-            problem = keptOnServer ? "Set the server and the key in Settings." : "The server did not keep this recording's audio, and this iPhone has no copy."
+            problem = missing
             return
         }
         let player = AVPlayer(playerItem: item)
@@ -78,6 +95,10 @@ final class RecordingPlayer {
         switch status {
         case .readyToPlay:
             duration = seconds.isFinite ? seconds : nil
+            if let s = pendingSeek {
+                pendingSeek = nil
+                seek(to: s)
+            }
         case .failed:
             if problem == nil { problem = error ?? "The audio could not be played." }
         default:
@@ -100,6 +121,11 @@ final class RecordingPlayer {
     /// Moves to `seconds` into the recording and plays from there.
     func seek(to seconds: Double) {
         guard let player else { return }
+        if player.currentItem?.status != .readyToPlay {
+            pendingSeek = seconds
+            time = seconds
+            return
+        }
         let t = CMTime(seconds: max(0, seconds), preferredTimescale: 1000)
         player.seek(to: t, toleranceBefore: .zero, toleranceAfter: CMTime(value: 1, timescale: 20))
         time = seconds
@@ -122,6 +148,7 @@ final class RecordingPlayer {
         time = 0
         duration = nil
         problem = nil
+        pendingSeek = nil
     }
 
     /// Playback, unless the recorder holds the session for a recording in progress.
@@ -137,6 +164,10 @@ final class RecordingPlayer {
         case .notKept: "The server did not keep this recording's audio (it was uploaded without keep_audio)."
         case .gone: "The server no longer has this recording's audio."
         case .status(401, _): "The server refused the key. Check it in Settings."
+        case .status(403, _): "This key cannot reach this audio."
+        case .status(404, "no_audio"): "akou kept no audio for this one."
+        case .status(404, _): "The server has no such audio."
+        case let .unplayable(mime): "This audio is \(mime.isEmpty ? "in a format" : mime) that iOS cannot play."
         case let .status(status, code): "The server answered HTTP \(status)\(code.map { ": \($0)" } ?? "")."
         case .notAudioURL: "The audio could not be played."
         }

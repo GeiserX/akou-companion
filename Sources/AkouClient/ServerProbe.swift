@@ -34,7 +34,7 @@ public struct ServerProbe: Sendable {
     }
 
     private func get<T: Decodable>(_ path: String) async throws -> T {
-        var req = URLRequest(url: try Endpoint.api(baseURL, path), cachePolicy: .reloadIgnoringLocalCacheData)
+        var req = URLRequest(url: try Endpoint.api(baseURL, path), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: AkouSession.readTimeout)
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         let (body, response) = try await session.data(for: req)

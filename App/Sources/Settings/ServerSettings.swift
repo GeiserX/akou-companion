@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import AkouClient
 import Foundation
 
-/// The settings other parts of the app read, under the `@AppStorage` keys they use. The key is
-/// not here: it lives in the Keychain (`KeyStore`).
+/// A server recordings can go to: its id, base URL and key.
+struct RecordTarget: Equatable {
+    var id: UUID
+    var url: URL
+    var key: String
+}
+
+/// The settings other parts of the app read, under the `@AppStorage` keys they use. The servers
+/// are a `ServerBook` under `ServerBook.defaultsKey`; their keys live in the Keychain (`KeyStore`).
 enum ServerSettings {
-    /// The akou server's base URL, for example `https://akou.example.com`.
-    static let serverURL = "serverURL"
     /// The workspace names, as a JSON array of strings.
     static let workspaces = "workspaces"
     /// The workspace a new recording gets.
@@ -17,12 +23,35 @@ enum ServerSettings {
     static let liveModel = "liveModel"
     /// Keep the recording on the phone after the server confirms it kept the audio.
     static let keepLocalCopy = "keepLocalCopy"
+    /// The server the Library shows, by id.
+    static let libraryServer = "libraryServer"
 
     static var defaults: UserDefaults { .standard }
 
-    static var url: URL? {
-        guard let s = defaults.string(forKey: serverURL)?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
-        return URL(string: s)
+    /// Every server, after the one-time move from the single server (`ServerMigration`), which
+    /// does nothing once done.
+    static var book: ServerBook {
+        ServerMigration.run(defaults: defaults, secrets: KeyStore.shared)
+    }
+
+    static func save(_ book: ServerBook) { book.save(defaults) }
+
+    /// "Record to": the server live text, uploads, the widget snapshot and the last-recording
+    /// intent use. Nil without one, or while its URL or key is missing.
+    static var recordTo: RecordTarget? { target(book.recordTo) }
+
+    static func target(_ id: UUID?) -> RecordTarget? {
+        guard let id, let entry = book.server(id), let url = entry.baseURL,
+              let key = KeyStore.key(id), !key.isEmpty else { return nil }
+        return RecordTarget(id: id, url: url, key: key)
+    }
+
+    static func jobsClient(_ id: UUID?) -> JobsClient? {
+        target(id).map { JobsClient(baseURL: $0.url, key: $0.key) }
+    }
+
+    static func historyClient(_ id: UUID?) -> HistoryClient? {
+        target(id).map { HistoryClient(baseURL: $0.url, key: $0.key) }
     }
 
     static var keepsLocalCopy: Bool { defaults.bool(forKey: keepLocalCopy) }

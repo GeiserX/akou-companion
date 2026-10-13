@@ -14,15 +14,19 @@ struct AkouCompanionApp: App {
     }
 
     init() {
+        // The single server of earlier versions becomes the first of several, once.
+        _ = ServerSettings.book
         let recorder = RecordingController.shared
-        // The settings keep the key in the Keychain; the recorder reads it there for live text.
-        recorder.serverKey = { KeyStore.load() }
-        // Every finished file goes to the upload queue, and shows under the Library's waiting rows.
+        // "Record to" and its key from the Keychain; the recorder uses them for live text.
+        recorder.recordTarget = { ServerSettings.recordTo }
+        recorder.recordToID = { ServerSettings.book.recordTo }
+        // Every finished file goes to the upload queue for the server it was recorded for, and
+        // shows under the Library's waiting rows.
         recorder.onFinished = { finished in
             Task {
                 await BackgroundUploader.shared.enqueue(
                     recordingID: finished.id.uuidString, file: finished.fileURL, title: finished.title,
-                    workspace: finished.workspace, language: finished.language
+                    workspace: finished.workspace, language: finished.language, serverID: finished.serverID
                 )
                 await LibraryStore.shared.loadWaiting()
             }

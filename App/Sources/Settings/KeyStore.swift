@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import AkouClient
 import Foundation
 import Security
 
-/// The server's `ak_` key, in the Keychain only: never in UserDefaults, a file or a log.
+/// Each server's `ak_` key, in the Keychain only: never in UserDefaults, a file or a log. The
+/// account is the server's id; before several servers, the one key was under `default`.
 ///
 /// Readable after the first unlock since boot and never synced or restored to another device
 /// (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`), so a background upload can read it while
 /// the phone is locked.
-enum KeyStore {
+struct KeyStore: SecretStore {
     private static let service = "akou-companion.server-key"
-    private static let account = "default"
 
-    private static var query: [String: Any] {
+    static let shared = KeyStore()
+
+    private static func query(_ account: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -20,8 +23,8 @@ enum KeyStore {
     }
 
     /// The saved key, or nil when there is none.
-    static func load() -> String? {
-        var q = query
+    func load(account: String) -> String? {
+        var q = Self.query(account)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         var out: CFTypeRef?
@@ -29,27 +32,32 @@ enum KeyStore {
         return String(data: data, encoding: .utf8)
     }
 
-    /// Saves `key`, replacing the old one; an empty key deletes it.
+    /// Saves `secret`, replacing the old one; an empty key deletes it.
     @discardableResult
-    static func save(_ key: String) -> Bool {
-        let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else { return delete() }
+    func save(_ secret: String, account: String) -> Bool {
+        let key = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return delete(account: account) }
         let data = Data(key.utf8)
         let update: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
-        let status = SecItemUpdate(query as CFDictionary, update as CFDictionary)
+        let status = SecItemUpdate(Self.query(account) as CFDictionary, update as CFDictionary)
         if status == errSecSuccess { return true }
         guard status == errSecItemNotFound else { return false }
-        var add = query
+        var add = Self.query(account)
         add.merge(update) { _, new in new }
         return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
     }
 
     @discardableResult
-    static func delete() -> Bool {
-        let status = SecItemDelete(query as CFDictionary)
+    func delete(account: String) -> Bool {
+        let status = SecItemDelete(Self.query(account) as CFDictionary)
         return status == errSecSuccess || status == errSecItemNotFound
     }
+
+    /// A server's key.
+    static func key(_ server: UUID) -> String? { shared.load(account: server.uuidString) }
+    @discardableResult static func save(_ key: String, server: UUID) -> Bool { shared.save(key, account: server.uuidString) }
+    @discardableResult static func delete(server: UUID) -> Bool { shared.delete(account: server.uuidString) }
 }

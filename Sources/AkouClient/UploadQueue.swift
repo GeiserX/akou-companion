@@ -2,7 +2,14 @@
 import AkouProtocol
 import Foundation
 
-/// The recordings waiting to reach the server, kept on disk so they survive an app restart.
+/// The recordings waiting to reach their server, kept on disk so they survive an app restart.
+///
+/// Each recording goes to the server it was recorded for (`Item.serverID`). An item from before
+/// the phone knew several servers has none: the first pass with a "Record to" writes it into every
+/// such item, whatever its state, since the single server of before became "Record to". From then
+/// on each item names its server, so a later change of "Record to" moves none of them, not even
+/// one waiting for its read-back. An item whose server was removed is parked with
+/// `serverRemovedCode`, never dropped, until `reassign` sends it to another server.
 ///
 /// Each recording moves `pending` -> `uploading` -> `submitted(jobID)` -> `done`. It is keyed by its
 /// recording id, which is also the upload's `Idempotency-Key`, so however many times an upload is
@@ -23,9 +30,41 @@ public actor UploadQueue {
         public var notBefore: Date?
         /// The last failure, for the recordings list.
         public var lastError: String?
+        /// The server this recording goes to; nil for one queued before the phone knew several
+        /// servers, which goes to "Record to".
+        public var serverID: UUID? = nil
 
         public var recordingID: String { submission.recordingID }
+
+        /// Parked because its server was removed: only `reassign` moves it on.
+        public var waitsForAServer: Bool {
+            if case let .parked(_, code) = state { code == UploadQueue.serverRemovedCode } else { false }
+        }
     }
+
+    /// Which servers exist, which of them can be sent to now, and which one takes the recordings
+    /// that name none.
+    public struct Routing: Sendable, Equatable {
+        /// Every server the settings hold. A recording for any other one is parked.
+        public var servers: Set<UUID>
+        public var recordTo: UUID?
+        /// The servers with a URL and a key now. A recording for a server that exists but is not
+        /// ready waits, unclaimed, until it is.
+        public var ready: Set<UUID>
+
+        public init(servers: Set<UUID>, recordTo: UUID?, ready: Set<UUID>? = nil) {
+            self.servers = servers
+            self.recordTo = recordTo
+            self.ready = ready ?? servers
+        }
+
+        /// Where an item goes: its own server, else "Record to"; nil when there is neither.
+        public func target(_ item: Item) -> UUID? { item.serverID ?? recordTo }
+    }
+
+    /// The `code` of an item parked because its server was removed.
+    public static let serverRemovedCode = "server_removed"
+    static let serverRemovedText = "The server this recording was made for was removed. Send it to another server."
 
     public enum State: Codable, Sendable, Equatable {
         case pending
@@ -94,11 +133,12 @@ public actor UploadQueue {
 
     // MARK: - Transitions
 
-    /// Adds a finished recording. Adding the same recording again changes nothing.
+    /// Adds a finished recording, for `serverID`, the server it was recorded for. Adding the same
+    /// recording again changes nothing.
     @discardableResult
-    public func enqueue(_ submission: JobsClient.Submission, fileName: String) throws -> Item {
+    public func enqueue(_ submission: JobsClient.Submission, fileName: String, serverID: UUID? = nil) throws -> Item {
         if let existing = byID[submission.recordingID] { return existing }
-        let item = Item(submission: submission, fileName: fileName, state: .pending, attempts: 0, notBefore: nil, lastError: nil)
+        let item = Item(submission: submission, fileName: fileName, state: .pending, attempts: 0, notBefore: nil, lastError: nil, serverID: serverID)
         byID[item.recordingID] = item
         order.append(item.recordingID)
         try save()
@@ -106,18 +146,68 @@ public actor UploadQueue {
     }
 
     /// The pending items whose time has come, now marked `uploading`. The caller uploads each one
-    /// and reports with `uploadEnded`.
-    public func claimDue() throws -> [Item] {
+    /// to its `serverID` and reports with `uploadEnded`.
+    ///
+    /// With `routing`, each item gets its server first: its own, else "Record to", written into the
+    /// item so a later change of "Record to" never moves it. An item with no server to go to waits;
+    /// one whose server is gone is parked. Without `routing` (one server, as in the tests of a
+    /// single server) every due item is claimed as it is.
+    public func claimDue(_ routing: Routing? = nil) throws -> [Item] {
         let t = now()
         var claimed: [Item] = []
+        var changed = routing.map(stampLegacy) ?? false
         for id in order {
             guard var item = byID[id], item.state == .pending, (item.notBefore ?? .distantPast) <= t else { continue }
+            if let routing {
+                guard let target = routing.target(item) else { continue }
+                guard routing.servers.contains(target) else {
+                    parkForRemovedServer(&item)
+                    byID[id] = item
+                    changed = true
+                    continue
+                }
+                guard routing.ready.contains(target) else { continue }
+                item.serverID = target
+            }
             item.state = .uploading
             byID[id] = item
             claimed.append(item)
+            changed = true
         }
-        if !claimed.isEmpty { try save() }
+        if changed { try save() }
         return claimed
+    }
+
+    /// Sends a parked item to `serverID` and makes it due now. The recording id stays the upload's
+    /// `Idempotency-Key`, so a server that already has it answers with its first job.
+    public func reassign(_ recordingID: String, to serverID: UUID) throws {
+        guard var item = byID[recordingID], case .parked = item.state else { return }
+        item.serverID = serverID
+        item.state = .pending
+        item.attempts = 0
+        item.notBefore = nil
+        item.lastError = nil
+        byID[recordingID] = item
+        try save()
+    }
+
+    /// Writes "Record to" into every item that names no server, in any state: those are from the
+    /// single server of before, which became "Record to". True when one changed; the caller saves.
+    private func stampLegacy(_ routing: Routing) -> Bool {
+        guard let recordTo = routing.recordTo else { return false }
+        var changed = false
+        for (id, var item) in byID where item.serverID == nil {
+            item.serverID = recordTo
+            byID[id] = item
+            changed = true
+        }
+        return changed
+    }
+
+    private func parkForRemovedServer(_ item: inout Item) {
+        item.state = .parked(status: nil, code: Self.serverRemovedCode)
+        item.lastError = Self.serverRemovedText
+        item.notBefore = nil
     }
 
     /// The upload of `recordingID` ended with `answer`.
@@ -168,13 +258,32 @@ public actor UploadQueue {
     }
 
     /// The submitted items whose time has come: the caller reads each job back with
-    /// `GET /v1/jobs/{id}` and reports with `confirmEnded`.
-    public func dueForConfirm() -> [(recordingID: String, jobID: String)] {
+    /// `GET /v1/jobs/{id}` on `serverID`, the server it was uploaded to, and reports with
+    /// `confirmEnded`. With `routing`, an item whose server was removed is parked instead (its
+    /// file is still on the phone, so `reassign` can send it elsewhere).
+    public func dueForConfirm(_ routing: Routing? = nil) throws -> [(recordingID: String, jobID: String, serverID: UUID?)] {
         let t = now()
-        return items.compactMap { item in
-            guard case let .submitted(jobID) = item.state, (item.notBefore ?? .distantPast) <= t else { return nil }
-            return (item.recordingID, jobID)
+        var out: [(recordingID: String, jobID: String, serverID: UUID?)] = []
+        var changed = routing.map(stampLegacy) ?? false
+        for id in order {
+            guard var item = byID[id], case let .submitted(jobID) = item.state, (item.notBefore ?? .distantPast) <= t else { continue }
+            // The server it was uploaded to, never "Record to" as it is now.
+            let target = item.serverID
+            if let routing {
+                // No server named and no "Record to" to stamp: it waits, never parked on a guess.
+                guard let server = target else { continue }
+                guard routing.servers.contains(server) else {
+                    parkForRemovedServer(&item)
+                    byID[id] = item
+                    changed = true
+                    continue
+                }
+                guard routing.ready.contains(server) else { continue }
+            }
+            out.append((item.recordingID, jobID, target))
         }
+        if changed { try save() }
+        return out
     }
 
     /// The read-back of a submitted job ended with `answer`. On a job, the item is done, and the
@@ -227,10 +336,11 @@ public actor UploadQueue {
 
     /// Parked items go back to `pending`, for example after the key or the URL changed. A retry
     /// sends the same `Idempotency-Key`, so a recording the server already has gets its first job.
+    /// An item whose server was removed stays parked: only `reassign` moves it.
     public func retryParked() throws {
         var changed = false
         for (id, var item) in byID {
-            guard case .parked = item.state else { continue }
+            guard case .parked = item.state, !item.waitsForAServer else { continue }
             item.state = .pending
             item.attempts = 0
             item.notBefore = nil
@@ -312,14 +422,27 @@ public struct URLSessionTransport: UploadTransport {
 }
 
 extension UploadQueue {
-    /// One pass over the queue in the foreground: uploads every due item, then reads back every
-    /// submitted one. Multipart bodies are written to `scratch` and deleted after each upload.
+    /// One pass over the queue in the foreground with one server: every item goes to `client`.
     public func drain(client: JobsClient, transport: UploadTransport, scratch: URL) async throws {
+        try await drain(routing: nil, client: { _ in client }, transport: transport, scratch: scratch)
+    }
+
+    /// One pass over the queue in the foreground with several servers: each item goes to its own
+    /// server's client in `clients`, an item with none to `recordTo`'s.
+    public func drain(clients: [UUID: JobsClient], recordTo: UUID?, transport: UploadTransport, scratch: URL) async throws {
+        let routing = Routing(servers: Set(clients.keys), recordTo: recordTo)
+        try await drain(routing: routing, client: { $0.flatMap { clients[$0] } }, transport: transport, scratch: scratch)
+    }
+
+    /// Uploads every due item, then reads back every submitted one. Multipart bodies are written
+    /// to `scratch` and deleted after each upload.
+    private func drain(routing: Routing?, client: (UUID?) -> JobsClient?, transport: UploadTransport, scratch: URL) async throws {
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
-        for item in try claimDue() {
+        for item in try claimDue(routing) {
             let body = scratch.appending(path: "\(item.recordingID).multipart")
             let request: URLRequest
             do {
+                guard let client = client(item.serverID) else { throw URLError(.badURL) }
                 request = try client.submitRequest(item.submission, audio: audioURL(item), bodyFile: body)
             } catch {
                 try? FileManager.default.removeItem(at: body)
@@ -330,8 +453,8 @@ extension UploadQueue {
             try? FileManager.default.removeItem(at: body)
             try uploadEnded(item.recordingID, answer)
         }
-        for (recordingID, jobID) in dueForConfirm() {
-            guard let request = try? client.jobRequest(jobID) else { continue }
+        for (recordingID, jobID, serverID) in try dueForConfirm(routing) {
+            guard let request = try? client(serverID)?.jobRequest(jobID) else { continue }
             try confirmEnded(recordingID, await transport.send(request))
         }
     }

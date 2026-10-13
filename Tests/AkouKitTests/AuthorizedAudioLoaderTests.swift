@@ -13,6 +13,8 @@ final class AudioStubProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var body = Data()
     nonisolated(unsafe) static var refusal: (Int, String)?
     nonisolated(unsafe) static var honourRange = true
+    /// The `Content-Type` of a 2xx answer.
+    nonisolated(unsafe) static var contentType = "audio/ogg"
     nonisolated(unsafe) static var seen: [URLRequest] = []
     static let lock = NSLock()
 
@@ -21,6 +23,7 @@ final class AudioStubProtocol: URLProtocol, @unchecked Sendable {
             self.body = body
             refusal = nil
             honourRange = true
+            contentType = "audio/ogg"
             seen = []
         }
     }
@@ -31,9 +34,9 @@ final class AudioStubProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        let (body, refusal, honour) = Self.lock.withLock {
+        let (body, refusal, honour, type) = Self.lock.withLock {
             Self.seen.append(request)
-            return (Self.body, Self.refusal, Self.honourRange)
+            return (Self.body, Self.refusal, Self.honourRange, Self.contentType)
         }
         let url = request.url!
         if let (status, json) = refusal {
@@ -45,7 +48,8 @@ final class AudioStubProtocol: URLProtocol, @unchecked Sendable {
         }
         var status = 200
         var slice = body[...]
-        var headers = ["Content-Type": "audio/ogg", "Accept-Ranges": "bytes"]
+        // A route that ignores Range (akou's dictation audio) sends no Accept-Ranges either.
+        var headers = honour ? ["Content-Type": type, "Accept-Ranges": "bytes"] : ["Content-Type": type]
         if honour, let range = request.value(forHTTPHeaderField: "Range"), range.hasPrefix("bytes=") {
             let span = range.dropFirst(6).split(separator: "-", omittingEmptySubsequences: false)
             let first = Int(span[0])!
@@ -121,9 +125,9 @@ final class AuthorizedAudioLoaderTests: XCTestCase {
         return URLSession(configuration: c)
     }
 
-    /// The request the app hands the loader: `JobsClient.audioRequest`, the path and the bearer header.
-    static func audioRequest(_ jobId: String) throws -> URLRequest {
-        try JobsClient(baseURL: base, key: key).audioRequest(jobId)
+    /// The request the app hands the loader: `JobsClient.audioRequest(path:)`, the path and the bearer header.
+    static func audioRequest(_ path: String) throws -> URLRequest {
+        try JobsClient(baseURL: base, key: key).audioRequest(path: path)
     }
 
     func loader(_ failures: FailureLog? = nil) -> AuthorizedAudioLoader {
@@ -192,7 +196,7 @@ final class AuthorizedAudioLoaderTests: XCTestCase {
         XCTAssertEqual(r.error as? AuthorizedAudioLoader.Failure, .notKept)
         XCTAssertNil(r.info)
         XCTAssertTrue(r.data.isEmpty)
-        XCTAssertEqual(log.all, [Failed(jobId: "job_2", failure: .notKept)])
+        XCTAssertEqual(log.all, [Failed(path: "/v1/jobs/job_2/audio", failure: .notKept)])
     }
 
     func test410IsGone() async throws {
@@ -202,7 +206,7 @@ final class AuthorizedAudioLoaderTests: XCTestCase {
         let r = FakeLoadingRequest(url: AuthorizedAudioLoader.url(jobId: "job_3"), length: 2)
         await run(loader(log), r)
         XCTAssertEqual(r.error as? AuthorizedAudioLoader.Failure, .gone)
-        XCTAssertEqual(log.all, [Failed(jobId: "job_3", failure: .gone)])
+        XCTAssertEqual(log.all, [Failed(path: "/v1/jobs/job_3/audio", failure: .gone)])
     }
 
     func testAnotherRefusalCarriesAkousCode() async throws {
@@ -216,7 +220,7 @@ final class AuthorizedAudioLoaderTests: XCTestCase {
     func testTheKeyTravelsInTheHeaderAndInNoURL() async throws {
         AudioStubProtocol.reset(try fixture())
         let assetURL = AuthorizedAudioLoader.url(jobId: "job_1")
-        XCTAssertEqual(assetURL.absoluteString, "akou-audio://job_1")
+        XCTAssertEqual(assetURL.absoluteString, "akou-audio://akou/v1/jobs/job_1/audio")
         let r = FakeLoadingRequest(url: assetURL, length: 2)
         await run(loader(), r)
         let seen = AudioStubProtocol.seenRequests
@@ -241,6 +245,60 @@ final class AuthorizedAudioLoaderTests: XCTestCase {
         XCTAssertEqual(AuthorizedAudioLoader.parseContentRange("bytes 100-149/12345")?.total, 12345)
         XCTAssertNil(AuthorizedAudioLoader.parseContentRange("bytes 100-149/*")?.total)
         XCTAssertNil(AuthorizedAudioLoader.parseContentRange("items 0-1/2"))
+    }
+
+    /// A call's part and a dictation go through the same loader: the path is the one in the URL,
+    /// on the loader's server, with the key in the header.
+    func testAnyAudioPathIsAskedOnTheLoadersServer() async throws {
+        let body = try fixture()
+        AudioStubProtocol.reset(body)
+        let history = HistoryClient(baseURL: Self.base, key: Self.key)
+        let l = AuthorizedAudioLoader(session: session()) { try history.audioRequest(path: $0) }
+        let callURL = AuthorizedAudioLoader.url(path: HistoryClient.callAudioPath("01JCALL", part: 2))
+        XCTAssertEqual(callURL.absoluteString, "akou-audio://akou/v1/calls/01JCALL/audio/2")
+        let r = FakeLoadingRequest(url: callURL, info: false, offset: 10, length: 20)
+        await run(l, r)
+        XCTAssertNil(r.error)
+        XCTAssertEqual(r.data, body[10..<30])
+
+        // A dictation's audio route sends the whole file, 200 without Range.
+        AudioStubProtocol.reset(body)
+        AudioStubProtocol.honourRange = false
+        let d = FakeLoadingRequest(url: AuthorizedAudioLoader.url(path: HistoryClient.dictationAudioPath("dct_1")), info: true, offset: 40, length: 8)
+        await run(l, d)
+        XCTAssertNil(d.error)
+        XCTAssertEqual(d.data, body[40..<48])
+        XCTAssertEqual(d.info?.contentLength, Int64(body.count))
+        XCTAssertEqual(d.info?.byteRangeAccessSupported, false, "a 200 without Accept-Ranges is not seekable by range")
+
+        let seen = AudioStubProtocol.seenRequests.first
+        XCTAssertEqual(seen?.url?.path, "/v1/dictations/dct_1/audio")
+        XCTAssertEqual(seen?.url?.host, "akou.example.com")
+        XCTAssertEqual(seen?.value(forHTTPHeaderField: "Authorization"), "Bearer \(Self.key)")
+        XCTAssertFalse(seen?.url?.absoluteString.contains(Self.key) ?? true)
+    }
+
+    /// akou serves a job's upload byte for byte; a browser's WebM recording is refused by name
+    /// instead of failing somewhere inside AVFoundation.
+    func testWebMIsRefusedAsUnplayable() async throws {
+        AudioStubProtocol.reset(Data(repeating: 1, count: 64))
+        AudioStubProtocol.contentType = "audio/webm"
+        let log = FailureLog()
+        let r = FakeLoadingRequest(url: AuthorizedAudioLoader.url(jobId: "job_w"), length: 2)
+        await run(loader(log), r)
+        XCTAssertEqual(r.error as? AuthorizedAudioLoader.Failure, .unplayable("audio/webm"))
+        XCTAssertTrue(r.data.isEmpty)
+        XCTAssertEqual(log.all, [Failed(path: "/v1/jobs/job_w/audio", failure: .unplayable("audio/webm"))])
+    }
+
+    /// The loader asks only the server's API: another host, a path outside `/v1/` or one that
+    /// climbs out of it is refused before any request.
+    func testOnlyAPIPathsAreOurs() {
+        XCTAssertEqual(AuthorizedAudioLoader.path(in: AuthorizedAudioLoader.url(path: "/v1/calls/c1/audio/1")), "/v1/calls/c1/audio/1")
+        XCTAssertNil(AuthorizedAudioLoader.path(in: URL(string: "akou-audio://evil/v1/jobs/j/audio")!))
+        XCTAssertNil(AuthorizedAudioLoader.path(in: URL(string: "akou-audio://akou/settings")!))
+        XCTAssertNil(AuthorizedAudioLoader.path(in: URL(string: "akou-audio://akou/v1/../admin")!))
+        XCTAssertNil(AuthorizedAudioLoader.path(in: URL(string: "https://akou/v1/jobs/j/audio")!))
     }
 
     // MARK: Through AVFoundation itself
@@ -291,14 +349,14 @@ final class AuthorizedAudioLoaderTests: XCTestCase {
 }
 
 struct Failed: Equatable {
-    var jobId: String
+    var path: String
     var failure: AuthorizedAudioLoader.Failure
 }
 
 final class FailureLog: @unchecked Sendable {
     private let lock = NSLock()
     private var items: [Failed] = []
-    func add(_ id: String, _ f: AuthorizedAudioLoader.Failure) { lock.withLock { items.append(Failed(jobId: id, failure: f)) } }
+    func add(_ path: String, _ f: AuthorizedAudioLoader.Failure) { lock.withLock { items.append(Failed(path: path, failure: f)) } }
     var all: [Failed] { lock.withLock { items } }
 }
 

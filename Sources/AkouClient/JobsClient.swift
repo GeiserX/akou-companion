@@ -152,9 +152,17 @@ public struct JobsClient: Sendable {
     /// server answers 409 `not_kept` for a job sent without `keep_audio` and 410 `gone` when the
     /// kept file is no longer on disk.
     public func audioRequest(_ id: String, range: ClosedRange<Int64>? = nil) throws -> URLRequest {
-        var req = try request("GET", "/v1/jobs/\(id)/audio", accept: "audio/*")
+        var req = try audioRequest(path: Self.audioPath(id))
         if let range { req.setValue("bytes=\(range.lowerBound)-\(range.upperBound)", forHTTPHeaderField: "Range") }
         return req
+    }
+
+    /// The path of a job's kept audio.
+    public static func audioPath(_ id: String) -> String { "/v1/jobs/\(HistoryClient.segment(id))/audio" }
+
+    /// A plain `GET` for any audio path on this server, the key in the header and never in the URL.
+    public func audioRequest(path: String) throws -> URLRequest {
+        try request("GET", path, accept: "audio/*")
     }
 
     // MARK: - Plumbing

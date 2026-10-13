@@ -26,18 +26,18 @@ final class EndToEndTests: XCTestCase {
         let samples = try FileSampleSource.samples(contentsOf: URL(fileURLWithPath: pcm))
         XCTAssertGreaterThan(samples.count, 16000 * 3, "the speech fixture is too short")
 
-        // The settings screen's two stores: the URL in UserDefaults, the key in the Keychain.
+        // The settings screen's two stores: the server list in UserDefaults, its key in the Keychain.
         let defaults = UserDefaults.standard
-        let saved = [ServerSettings.serverURL, ServerSettings.defaultWorkspace, ServerSettings.keepLocalCopy].map { ($0, defaults.object(forKey: $0)) }
-        let savedKey = KeyStore.load()
+        let saved = [ServerBook.defaultsKey, ServerSettings.defaultWorkspace, ServerSettings.keepLocalCopy].map { ($0, defaults.object(forKey: $0)) }
+        let server = ServerEntry(name: "e2e", url: raw)
         addTeardownBlock { @MainActor in
             for (k, v) in saved { defaults.set(v, forKey: k) }
-            if let savedKey { KeyStore.save(savedKey) } else { KeyStore.delete() }
+            KeyStore.delete(server: server.id)
         }
-        defaults.set(raw, forKey: ServerSettings.serverURL)
+        ServerSettings.save(ServerBook(servers: [server], recordTo: server.id))
         defaults.set("e2e", forKey: ServerSettings.defaultWorkspace)
         defaults.set(false, forKey: ServerSettings.keepLocalCopy)
-        XCTAssertTrue(KeyStore.save(key))
+        XCTAssertTrue(KeyStore.save(key, server: server.id))
         await BackgroundUploader.shared.settingsChanged()
 
         let recorder = RecordingController.shared
@@ -68,7 +68,8 @@ final class EndToEndTests: XCTestCase {
         XCTAssertFalse(RecordingStatus.isRecording)
 
         // 4. The background upload lands; the Library lists the job, kept, in its workspace.
-        let client = try XCTUnwrap(LibraryStore.client())
+        let client = try XCTUnwrap(ServerSettings.jobsClient(server.id))
+        LibraryStore.shared.show(server: server.id, everyJob: false)
         var job: Job?
         try await waitUntil(seconds: 180) {
             await LibraryStore.shared.refresh()

@@ -3,45 +3,48 @@ import AkouClient
 import AkouProtocol
 import SwiftUI
 
-/// The server settings and their test: `GET /v1/server` and `GET /v1/keys/me` on the URL given.
-/// The key is kept in the Keychain (`KeyStore`); everything else in `@AppStorage` under the keys
-/// in `ServerSettings`.
+/// The servers, "Record to", live text, workspaces and the local copy. Each server's key is in the
+/// Keychain (`KeyStore`); the servers are a `ServerBook` and everything else is in `@AppStorage`
+/// under the keys in `ServerSettings`.
 struct SettingsView: View {
-    @AppStorage(ServerSettings.serverURL) private var serverURL = ""
+    @AppStorage(ServerBook.defaultsKey) private var bookJSON = ""
     @AppStorage(ServerSettings.workspaces) private var workspacesJSON = "[]"
     @AppStorage(ServerSettings.defaultWorkspace) private var defaultWorkspace = ""
     @AppStorage(ServerSettings.liveLanguage) private var liveLanguage = "auto"
     @AppStorage(ServerSettings.liveModel) private var liveModel = "auto"
     @AppStorage(ServerSettings.keepLocalCopy) private var keepLocalCopy = false
-    @State private var key = ""
-    /// The key as the Keychain holds it, so only a real change is saved and retries parked uploads.
-    @State private var savedKey = ""
     @State private var newWorkspace = ""
-    @State private var engines: [String] = []
-    @State private var result: String?
-    @State private var testing = false
+    /// The id a new server gets, fixed while its editor is open.
+    @State private var newServerID = UUID()
 
     private var workspaces: [String] { ServerSettings.decodeWorkspaces(workspacesJSON) }
 
+    private var book: ServerBook { ServerBook.decode(bookJSON) ?? ServerBook() }
+
     var body: some View {
         Form {
-            Section("akou server") {
-                TextField("https://akou.example.com", text: $serverURL)
-                    .textContentType(.URL)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                SecureField("ak_ key", text: $key)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .onSubmit(saveKey)
-            }
             Section {
-                Button(testing ? "Testing…" : "Test") { Task { await test() } }
-                    .disabled(testing || serverURL.isEmpty || key.isEmpty)
-                if let result {
-                    Text(result).font(.footnote)
+                ForEach(book.servers) { entry in
+                    NavigationLink {
+                        ServerEditorView(id: entry.id, isNew: false)
+                    } label: {
+                        ServerRow(entry: entry, isRecordTo: entry.id == book.recordTo)
+                    }
                 }
+                NavigationLink {
+                    ServerEditorView(id: newServerID, isNew: true)
+                } label: {
+                    Label("Add a server", systemImage: "plus")
+                }
+                if book.servers.contains(where: \.canBeRecordTo) {
+                    Picker("Record to", selection: recordTo) {
+                        ForEach(book.servers.filter(\.canBeRecordTo)) { Text($0.name).tag(Optional($0.id)) }
+                    }
+                }
+            } header: {
+                Text("Servers")
+            } footer: {
+                Text(serversFooter)
             }
             Section {
                 TextField("Language (auto, en, es…)", text: $liveLanguage)
@@ -80,27 +83,35 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("akou")
-        .onAppear {
-            savedKey = KeyStore.load() ?? ""
-            key = savedKey
-        }
-        .onDisappear(perform: saveKey)
+        .onAppear { newServerID = UUID() }
     }
 
-    /// The models the last test listed, plus a pinned one the server no longer lists, so the
-    /// picker never shows an empty choice.
+    private var serversFooter: String {
+        let readOnly = book.servers.filter { !$0.canBeRecordTo }.map(\.name)
+        var text = "Live text, uploads, the widget and the last-recording summary use Record to. Recordings already made keep the server they were made for."
+        if !readOnly.isEmpty {
+            text += " \(readOnly.joined(separator: ", ")): its key cannot upload, so it cannot be Record to."
+        }
+        return text
+    }
+
+    private var recordTo: Binding<UUID?> {
+        Binding(
+            get: { book.recordTo },
+            set: { id in
+                var b = book
+                b.recordTo = id
+                bookJSON = b.encoded()
+                Task { await BackgroundUploader.shared.settingsChanged() }
+            })
+    }
+
+    /// The models the last Test of "Record to" listed, plus a pinned one the server no longer
+    /// lists, so the picker never shows an empty choice.
     private var modelChoices: [String] {
-        var out = engines
+        var out = book.recordToServer?.tested?.liveEngines ?? []
         if liveModel != "auto" && !out.contains(liveModel) { out.append(liveModel) }
         return out
-    }
-
-    private func saveKey() {
-        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed != savedKey, KeyStore.save(trimmed) else { return }
-        savedKey = trimmed
-        // A new key or URL may unblock uploads that were refused with the old one.
-        Task { await BackgroundUploader.shared.settingsChanged() }
     }
 
     private func addWorkspace() {
@@ -117,29 +128,26 @@ struct SettingsView: View {
         workspacesJSON = ServerSettings.encodeWorkspaces(names)
         if !names.contains(defaultWorkspace) { defaultWorkspace = names.first ?? "" }
     }
+}
 
-    private func test() async {
-        saveKey()
-        testing = true
-        defer { testing = false }
-        guard let url = URL(string: serverURL.trimmingCharacters(in: .whitespaces)) else {
-            result = "That is not a URL."
-            return
-        }
-        let probe = ServerProbe(baseURL: url, key: key)
-        do {
-            let info = try await probe.server()
-            let me = try await probe.keyInfo()
-            engines = info.liveEngines
-            let live = info.supportsLive
-                ? "live text with \(info.liveEngines.joined(separator: ", "))"
-                : "no live text on this server"
-            result = "akou \(info.version ?? "?") (\(info.mode ?? "?")), key \(me.name ?? me.id), \(live)"
-            await BackgroundUploader.shared.settingsChanged()
-        } catch let f as Endpoint.Failure {
-            result = "Refused: \(f). Use https, or plain http only to a private address."
-        } catch {
-            result = "Failed: \(error)"
+/// A server in the list: its name, its host and what its key may do.
+private struct ServerRow: View {
+    let entry: ServerEntry
+    let isRecordTo: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(entry.name)
+                if isRecordTo {
+                    Text("Record to").font(.caption).padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(Color.accentColor.opacity(0.15), in: Capsule())
+                }
+            }
+            Text(entry.baseURL?.host(percentEncoded: false) ?? "No URL yet")
+                .font(.footnote).foregroundStyle(.secondary)
+            Text(ServerEditorView.summary(entry.tested))
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 }
