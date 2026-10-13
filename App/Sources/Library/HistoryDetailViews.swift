@@ -48,7 +48,8 @@ struct CallDetailView: View {
                     }
                 }
                 if let transcript {
-                    VStack(alignment: .leading, spacing: 10) {
+                    // Lazy: a two-and-a-half-hour call has thousands of lines.
+                    LazyVStack(alignment: .leading, spacing: 10) {
                         Text("Transcript").font(.headline)
                         if let zone = transcript.zone { Text(zone).font(.caption).foregroundStyle(.secondary) }
                         if transcript.lines.isEmpty {
@@ -122,14 +123,15 @@ struct CallDetailView: View {
         player.load(path: HistoryClient.callAudioPath(callId, part: n), request: { try client.audioRequest(path: $0) }, missing: "")
     }
 
-    /// A line is `(w0 - wallStart) / 1000` seconds into its part's file.
+    /// Plays from the line: `a0` seconds into its part, or the wall-clock offset from an older akou.
     private func seek(to line: CallLine) {
-        guard let start = call?.parts.first(where: { $0.part == line.part })?.wallStart else { return }
+        let start = call?.parts.first(where: { $0.part == line.part })?.wallStart
+        guard let seconds = line.seconds(intoPartStartingAt: start) else { return }
         if line.part != loadedPart {
             loadAudio(part: line.part)
             part = line.part
         }
-        player.seek(to: max(0, (line.w0 - start) / 1000))
+        player.seek(to: seconds)
     }
 }
 

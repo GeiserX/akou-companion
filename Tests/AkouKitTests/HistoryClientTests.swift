@@ -222,6 +222,19 @@ final class HistoryClientTests: XCTestCase {
         XCTAssertEqual(t.lines[1].time, "")
     }
 
+    /// After a pause the part's file stops advancing while the clock goes on, so a line's place
+    /// in the audio is `a0`, not its wall-clock offset; an older akou without `a0` gets the offset.
+    func testALineSeeksToA0WhenAkouSendsIt() throws {
+        let json = #"{"call":"c","lines":[{"id":"s9","time":"08:30:00","w0":1760337000000,"a0":312.5,"a1":316,"part":1,"speaker":"Ana","text":"After the pause."},{"id":"s1","time":"08:00:05","w0":1760335205000,"part":1,"speaker":"You","text":"Old akou."}]}"#
+        let t = try JSONDecoder().decode(CallTranscript.self, from: Data(json.utf8))
+        let wallStart = 1760335201000.0
+        XCTAssertEqual((t.lines[0].w0 - wallStart) / 1000, 1799, "the wall-clock offset, wrong after a pause")
+        XCTAssertEqual(t.lines[0].seconds(intoPartStartingAt: wallStart), 312.5)
+        XCTAssertEqual(t.lines[0].a1, 316)
+        XCTAssertEqual(t.lines[1].seconds(intoPartStartingAt: wallStart), 4, "no a0: the wall-clock offset")
+        XCTAssertNil(t.lines[1].seconds(intoPartStartingAt: nil))
+    }
+
     func testTheSummaryIsThereOrNil() async throws {
         let s = try await client().summary("01JCALLB0000000000000000002")
         XCTAssertEqual(s?.rev, 2)

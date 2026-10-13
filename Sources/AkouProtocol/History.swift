@@ -118,6 +118,11 @@ public struct CallLine: Decodable, Sendable, Equatable, Identifiable {
     /// Epoch ms the line starts and ends.
     public var w0: Double
     public var w1: Double?
+    /// Seconds into the line's part file where it starts and ends. They differ from the wall-clock
+    /// offset once the call paused (the file does not advance during a pause). Absent from an akou
+    /// older than these fields.
+    public var a0: Double?
+    public var a1: Double?
     public var part: Int
     /// `mic` or `call`.
     public var ch: String?
@@ -126,7 +131,7 @@ public struct CallLine: Decodable, Sendable, Equatable, Identifiable {
     public var speaker: String
     public var text: String
 
-    enum CodingKeys: String, CodingKey { case id, time, w0, w1, part, ch, spk, speaker, text }
+    enum CodingKeys: String, CodingKey { case id, time, w0, w1, a0, a1, part, ch, spk, speaker, text }
 
     /// One odd line (a field missing or null) never costs the whole transcript.
     public init(from decoder: Decoder) throws {
@@ -135,11 +140,24 @@ public struct CallLine: Decodable, Sendable, Equatable, Identifiable {
         id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? "w\(Int(w0))"
         time = (try? c.decodeIfPresent(String.self, forKey: .time)) ?? ""
         w1 = try? c.decodeIfPresent(Double.self, forKey: .w1)
+        a0 = try? c.decodeIfPresent(Double.self, forKey: .a0)
+        a1 = try? c.decodeIfPresent(Double.self, forKey: .a1)
         part = (try? c.decodeIfPresent(Int.self, forKey: .part)) ?? 1
         ch = try? c.decodeIfPresent(String.self, forKey: .ch)
         spk = try? c.decodeIfPresent(String.self, forKey: .spk)
         speaker = (try? c.decodeIfPresent(String.self, forKey: .speaker)) ?? spk ?? ""
         text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
+    }
+}
+
+extension CallLine {
+    /// Where the line starts in its part's audio, in seconds: `a0` when akou sends it, else the
+    /// wall-clock offset from the part's start, which is right only for a part that never paused.
+    /// Nil when neither is known.
+    public func seconds(intoPartStartingAt wallStart: Double?) -> Double? {
+        if let a0 { return max(0, a0) }
+        guard let wallStart else { return nil }
+        return max(0, (w0 - wallStart) / 1000)
     }
 }
 

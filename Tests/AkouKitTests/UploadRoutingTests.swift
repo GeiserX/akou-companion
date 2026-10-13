@@ -99,6 +99,31 @@ final class UploadRoutingTests: XCTestCase {
         }
     }
 
+    /// An old item already uploaded, waiting for its read-back when the phone updates: it was sent
+    /// to the single server of before, now "Record to". The first pass writes that server into it,
+    /// so a change of "Record to" before the read-back still reads it back where the job is.
+    func testAnOldItemAwaitingItsReadBackKeepsItsServerWhenRecordToMoves() async throws {
+        let stateDir = dir.appending(path: "state")
+        try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+        try Data("OggS old".utf8).write(to: audioDir.appending(path: "old.opus"))
+        // The shape the queue wrote before this change, for an item the server had answered.
+        let old = #"[{"submission":{"recordingID":"old","keepAudio":true},"fileName":"old.opus","state":{"submitted":{"jobID":"j7"}},"attempts":0}]"#
+        try Data(old.utf8).write(to: stateDir.appending(path: "uploads.json"))
+        let queue = try makeQueue()
+
+        // The first pass after the update, with a (not reachable yet): nothing sent, a written in.
+        let confirms = try await queue.dueForConfirm(.init(servers: [a, b], recordTo: a, ready: []))
+        XCTAssertTrue(confirms.isEmpty)
+        do {
+            let it = await queue.item("old")
+            XCTAssertEqual(it?.serverID, a)
+        }
+
+        // Record to moves to b; the read-back still goes to a.
+        try await drain(queue, servers: [a, b], recordTo: b)
+        XCTAssertEqual(asked(), ["a GET /v1/jobs/j7"])
+    }
+
     func testARemovedServersRecordingWaitsWithItsFileUntilSentElsewhere() async throws {
         let queue = try makeQueue()
         let file = try await record(queue, "r1", for: removed)

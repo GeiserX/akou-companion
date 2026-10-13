@@ -5,9 +5,11 @@ import Foundation
 /// The recordings waiting to reach their server, kept on disk so they survive an app restart.
 ///
 /// Each recording goes to the server it was recorded for (`Item.serverID`). An item from before
-/// the phone knew several servers has none, and goes to "Record to", which is then written into
-/// it. An item whose server was removed is parked with `serverRemovedCode`, never dropped, until
-/// `reassign` sends it to another server.
+/// the phone knew several servers has none: the first pass with a "Record to" writes it into every
+/// such item, whatever its state, since the single server of before became "Record to". From then
+/// on each item names its server, so a later change of "Record to" moves none of them, not even
+/// one waiting for its read-back. An item whose server was removed is parked with
+/// `serverRemovedCode`, never dropped, until `reassign` sends it to another server.
 ///
 /// Each recording moves `pending` -> `uploading` -> `submitted(jobID)` -> `done`. It is keyed by its
 /// recording id, which is also the upload's `Idempotency-Key`, so however many times an upload is
@@ -153,7 +155,7 @@ public actor UploadQueue {
     public func claimDue(_ routing: Routing? = nil) throws -> [Item] {
         let t = now()
         var claimed: [Item] = []
-        var changed = false
+        var changed = routing.map(stampLegacy) ?? false
         for id in order {
             guard var item = byID[id], item.state == .pending, (item.notBefore ?? .distantPast) <= t else { continue }
             if let routing {
@@ -187,6 +189,19 @@ public actor UploadQueue {
         item.lastError = nil
         byID[recordingID] = item
         try save()
+    }
+
+    /// Writes "Record to" into every item that names no server, in any state: those are from the
+    /// single server of before, which became "Record to". True when one changed; the caller saves.
+    private func stampLegacy(_ routing: Routing) -> Bool {
+        guard let recordTo = routing.recordTo else { return false }
+        var changed = false
+        for (id, var item) in byID where item.serverID == nil {
+            item.serverID = recordTo
+            byID[id] = item
+            changed = true
+        }
+        return changed
     }
 
     private func parkForRemovedServer(_ item: inout Item) {
@@ -249,13 +264,15 @@ public actor UploadQueue {
     public func dueForConfirm(_ routing: Routing? = nil) throws -> [(recordingID: String, jobID: String, serverID: UUID?)] {
         let t = now()
         var out: [(recordingID: String, jobID: String, serverID: UUID?)] = []
-        var changed = false
+        var changed = routing.map(stampLegacy) ?? false
         for id in order {
             guard var item = byID[id], case let .submitted(jobID) = item.state, (item.notBefore ?? .distantPast) <= t else { continue }
-            var target = item.serverID
+            // The server it was uploaded to, never "Record to" as it is now.
+            let target = item.serverID
             if let routing {
-                target = routing.target(item)
-                guard let server = target, routing.servers.contains(server) else {
+                // No server named and no "Record to" to stamp: it waits, never parked on a guess.
+                guard let server = target else { continue }
+                guard routing.servers.contains(server) else {
                     parkForRemovedServer(&item)
                     byID[id] = item
                     changed = true
