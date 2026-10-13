@@ -213,6 +213,15 @@ final class HistoryClientTests: XCTestCase {
         XCTAssertTrue(q.contains("layer=best") && q.contains("review=skip") && q.contains("format=json"), q)
     }
 
+    /// A line a newer or odder akou writes without a speaker or a time keeps the rest of the transcript.
+    func testAnOddLineNeverCostsTheTranscript() throws {
+        let json = #"{"call":"c","lines":[{"id":"s1","time":"08:00:05","w0":1,"part":1,"speaker":"You","text":"Hi"},{"id":"s2","w0":2,"part":1,"spk":"c3","speaker":null,"text":"Unnamed"}]}"#
+        let t = try JSONDecoder().decode(CallTranscript.self, from: Data(json.utf8))
+        XCTAssertEqual(t.lines.map(\.text), ["Hi", "Unnamed"])
+        XCTAssertEqual(t.lines[1].speaker, "c3", "no name: the speaker's id")
+        XCTAssertEqual(t.lines[1].time, "")
+    }
+
     func testTheSummaryIsThereOrNil() async throws {
         let s = try await client().summary("01JCALLB0000000000000000002")
         XCTAssertEqual(s?.rev, 2)

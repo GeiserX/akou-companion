@@ -99,6 +99,20 @@ final class ServerBookTests: XCTestCase {
         XCTAssertEqual(ServerMigration.run(defaults: defaults, secrets: secrets, makeID: { UUID() }).servers.map(\.id), [fixedID])
     }
 
+    /// An old URL and key that turn up beside a book that does not hold them (a backup restored
+    /// after the move) become one more server; the old key is never deleted without its copy.
+    func testAnOldPairBesideABookThatLacksItIsAddedNeverDropped() {
+        let other = ServerEntry(name: "other", url: "https://other.example.com")
+        let secrets = oldPhone()
+        _ = secrets.save("ak_other", account: other.id.uuidString)
+        ServerBook(servers: [other], recordTo: other.id).save(defaults)
+        let book = ServerMigration.run(defaults: defaults, secrets: secrets, makeID: { self.fixedID })
+        XCTAssertEqual(book.servers.map(\.id), [other.id, fixedID])
+        XCTAssertEqual(book.recordTo, other.id, "Record to stays where it was")
+        XCTAssertEqual(secrets.all, [other.id.uuidString: "ak_other", fixedID.uuidString: "ak_old_key"])
+        XCTAssertNil(defaults.object(forKey: ServerMigration.legacyURLKey))
+    }
+
     func testANewPhoneStartsWithNoServers() {
         let secrets = MemorySecrets()
         let book = ServerMigration.run(defaults: defaults, secrets: secrets)

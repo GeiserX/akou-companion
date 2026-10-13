@@ -126,9 +126,10 @@ public protocol SecretStore: Sendable {
 /// Safe to run on every launch and to cut off at any point:
 /// 1. the new server's id is chosen once and kept (`migratingIDKey`), so a rerun reuses it;
 /// 2. the key is copied to the new id's Keychain entry;
-/// 3. the book is written: from then on the migration is done;
-/// 4. the old URL, the old key and the kept id are removed. A rerun that finds the book and the
-///    old URL still there (a stop between 3 and 4) finishes this step only.
+/// 3. the server is written into the book;
+/// 4. the old URL, the old key and the kept id are removed.
+/// The old key is removed only once the book holds a server with its copy. An old pair that turns
+/// up beside a book that does not hold it is added as one more server, never dropped.
 public enum ServerMigration {
     public static let legacyURLKey = "serverURL"
     public static let legacyAccount = "default"
@@ -136,42 +137,45 @@ public enum ServerMigration {
 
     @discardableResult
     public static func run(defaults: UserDefaults, secrets: some SecretStore, makeID: () -> UUID = UUID.init) -> ServerBook {
-        if let book = ServerBook.load(defaults) {
-            if defaults.object(forKey: legacyURLKey) != nil || defaults.object(forKey: migratingIDKey) != nil {
-                cleanUp(defaults: defaults, secrets: secrets, book: book)
-            }
-            return book
-        }
+        let existing = ServerBook.load(defaults)
         let url = defaults.string(forKey: legacyURLKey)?.trimmingCharacters(in: .whitespaces) ?? ""
         let key = secrets.load(account: legacyAccount)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let keptID = defaults.string(forKey: migratingIDKey).flatMap(UUID.init(uuidString:))
         guard !url.isEmpty || !key.isEmpty else {
-            let empty = ServerBook()
-            empty.save(defaults)
-            defaults.removeObject(forKey: legacyURLKey)
-            return empty
+            let book = existing ?? ServerBook()
+            if existing == nil { book.save(defaults) }
+            if defaults.object(forKey: legacyURLKey) != nil || keptID != nil { cleanUp(defaults: defaults, secrets: secrets) }
+            return book
         }
-        let id = defaults.string(forKey: migratingIDKey).flatMap(UUID.init(uuidString:)) ?? {
+        if let existing, holds(existing, url: url, key: key, keptID: keptID, secrets: secrets) {
+            cleanUp(defaults: defaults, secrets: secrets)
+            return existing
+        }
+        let id = keptID ?? {
             let new = makeID()
             defaults.set(new.uuidString, forKey: migratingIDKey)
             return new
         }()
         if !key.isEmpty {
-            // Without the key in its new place the book is not written: the next launch tries again.
-            guard secrets.save(key, account: id.uuidString) else { return ServerBook() }
+            // Without the key in its new place nothing is written: the next launch tries again.
+            guard secrets.save(key, account: id.uuidString) else { return existing ?? ServerBook() }
         }
-        let book = ServerBook(servers: [ServerEntry(id: id, name: ServerEntry.name(for: url), url: url)], recordTo: id)
+        var book = existing ?? ServerBook()
+        book.upsert(ServerEntry(id: id, name: ServerEntry.name(for: url), url: url))
         book.save(defaults)
-        cleanUp(defaults: defaults, secrets: secrets, book: book)
+        cleanUp(defaults: defaults, secrets: secrets)
         return book
     }
 
-    private static func cleanUp(defaults: UserDefaults, secrets: some SecretStore, book: ServerBook) {
-        // The old key goes only once its copy is in place under a server the book holds.
-        if let id = defaults.string(forKey: migratingIDKey).flatMap(UUID.init(uuidString:)),
-           book.server(id) != nil, secrets.load(account: legacyAccount) != nil,
-           secrets.load(account: id.uuidString) == nil {
-            return
-        }
+    /// Whether the book already holds the old pair: the server the migration made, or a server
+    /// whose own key is the old key (or, with no old key, whose URL is the old URL).
+    private static func holds(_ book: ServerBook, url: String, key: String, keptID: UUID?, secrets: some SecretStore) -> Bool {
+        if let keptID, book.server(keptID) != nil, key.isEmpty || secrets.load(account: keptID.uuidString) == key { return true }
+        if key.isEmpty { return book.servers.contains { $0.url == url } }
+        return book.servers.contains { secrets.load(account: $0.id.uuidString) == key }
+    }
+
+    private static func cleanUp(defaults: UserDefaults, secrets: some SecretStore) {
         secrets.delete(account: legacyAccount)
         defaults.removeObject(forKey: legacyURLKey)
         defaults.removeObject(forKey: migratingIDKey)

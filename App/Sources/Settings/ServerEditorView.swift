@@ -132,7 +132,8 @@ struct ServerEditorView: View {
             result = "That is not a URL."
             return
         }
-        let probe = ServerProbe(baseURL: base, key: key)
+        // The key as saved: a pasted trailing newline must not fail the Test of a key that works.
+        let probe = ServerProbe(baseURL: base, key: key.trimmingCharacters(in: .whitespacesAndNewlines))
         do {
             let info = try await probe.server()
             let me = try await probe.keyInfo()

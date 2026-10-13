@@ -131,6 +131,9 @@ final class DictationsStore {
             let known = Set(items.map(\.id))
             items += page.items.filter { !known.contains($0.id) }
             cursor = page.nextCursor
+        } catch HistoryClient.Failure.cannotSeeHistory {
+            cannotSee = true
+            cursor = nil
         } catch {
             self.error = LibraryStore.describe(error)
         }

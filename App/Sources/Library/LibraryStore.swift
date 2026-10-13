@@ -107,6 +107,7 @@ final class LibraryStore {
                 cursor = page.cursor
             }
         } catch {
+            guard serverID == self.serverID else { return }
             self.error = Self.describe(error)
         }
     }

@@ -125,6 +125,22 @@ public struct CallLine: Decodable, Sendable, Equatable, Identifiable {
     public var spk: String?
     public var speaker: String
     public var text: String
+
+    enum CodingKeys: String, CodingKey { case id, time, w0, w1, part, ch, spk, speaker, text }
+
+    /// One odd line (a field missing or null) never costs the whole transcript.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        w0 = (try? c.decodeIfPresent(Double.self, forKey: .w0)) ?? 0
+        id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? "w\(Int(w0))"
+        time = (try? c.decodeIfPresent(String.self, forKey: .time)) ?? ""
+        w1 = try? c.decodeIfPresent(Double.self, forKey: .w1)
+        part = (try? c.decodeIfPresent(Int.self, forKey: .part)) ?? 1
+        ch = try? c.decodeIfPresent(String.self, forKey: .ch)
+        spk = try? c.decodeIfPresent(String.self, forKey: .spk)
+        speaker = (try? c.decodeIfPresent(String.self, forKey: .speaker)) ?? spk ?? ""
+        text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
+    }
 }
 
 /// `GET /v1/calls/{id}/enhanced` (akou `src/main/api/routes/post-call.ts`): the summary, when there is one.
@@ -153,6 +169,16 @@ public struct CallNote: Decodable, Sendable, Equatable, Identifiable {
     public var w: Double
     /// `human` or `agent`.
     public var author: String?
+
+    enum CodingKeys: String, CodingKey { case id, text, w, author }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        w = (try? c.decodeIfPresent(Double.self, forKey: .w)) ?? 0
+        id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? "n\(Int(w))"
+        text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
+        author = try? c.decodeIfPresent(String.self, forKey: .author)
+    }
 }
 
 /// One dictation (akou `src/main/api/routes/dictation.ts` `dictationBody`).
