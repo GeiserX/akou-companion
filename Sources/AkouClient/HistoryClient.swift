@@ -119,7 +119,8 @@ public struct HistoryClient: Sendable {
     }
 
     private func get<T: Decodable>(_ path: String, _ query: [URLQueryItem] = []) async throws -> T {
-        let req = try Self.request(baseURL, key: key, "GET", path, query: query, accept: "application/json")
+        var req = try Self.request(baseURL, key: key, "GET", path, query: query, accept: "application/json")
+        req.timeoutInterval = AkouSession.readTimeout
         let (body, response) = try await session.data(for: req)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {

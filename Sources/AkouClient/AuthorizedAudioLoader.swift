@@ -292,6 +292,14 @@ final class RangeFetch: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         queue.async { self.received(data) }
     }
 
+    /// This task's own delegate answers redirects too: the same origin only, so the key never leaves.
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(AkouSession.allowsRedirect(from: task.originalRequest?.url, to: request.url) ? request : nil)
+    }
+
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         queue.async { self.completed(error) }
     }

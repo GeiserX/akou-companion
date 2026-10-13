@@ -245,6 +245,14 @@ extension BackgroundUploader: URLSessionDataDelegate {
         }
     }
 
+    /// An upload carries the key: a redirect to another origin is never followed.
+    nonisolated func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(AkouSession.allowsRedirect(from: task.originalRequest?.url, to: request.url) ? request : nil)
+    }
+
     nonisolated func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
         MainActor.assumeIsolated { finishedEvents() }
     }
