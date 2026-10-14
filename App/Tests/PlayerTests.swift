@@ -30,4 +30,34 @@ final class PlayerTests: XCTestCase {
         XCTAssertEqual(length, seconds, accuracy: 1.5)
         player.stop()
     }
+
+    /// The server's length is shown over AVFoundation's estimate, which for an Ogg Opus can be far
+    /// off (18:38 for a call part of 11:10); the estimate stays the fallback.
+    func testTheServersLengthWinsOverThePlayersEstimate() async throws {
+        XCTAssertEqual(RecordingPlayer.length(known: 669.66, estimated: 1118), 669.66)
+        XCTAssertEqual(RecordingPlayer.length(known: nil, estimated: 1118), 1118)
+        XCTAssertEqual(RecordingPlayer.length(known: 0, estimated: 1118), 1118)
+        XCTAssertEqual(RecordingPlayer.length(known: .nan, estimated: 1118), 1118)
+        XCTAssertNil(RecordingPlayer.length(known: nil, estimated: nil))
+
+        let url = FileManager.default.temporaryDirectory.appending(path: "player-\(UUID().uuidString).opus")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let file = try RecordingFile(url: url)
+        for _ in 0..<20 { file.append([Float](repeating: 0, count: 1600)) }
+        _ = await file.finish()
+
+        // A length no estimate of this 2 s file comes near, so only the server's can pass.
+        let player = RecordingPlayer()
+        player.load(path: nil, local: url, length: 7.5, request: nil, missing: "")
+        XCTAssertEqual(player.duration, 7.5)
+        let deadline = Date().addingTimeInterval(20)
+        while player.estimatedLength == nil && player.problem == nil && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertNil(player.problem)
+        XCTAssertNotNil(player.estimatedLength, "the player never read its own length")
+        XCTAssertEqual(player.duration, 7.5, "the player's estimate replaced the server's length")
+        player.stop()
+        XCTAssertNil(player.duration)
+    }
 }
