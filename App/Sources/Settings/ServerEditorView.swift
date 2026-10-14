@@ -98,7 +98,10 @@ struct ServerEditorView: View {
         var entry = book.server(id) ?? ServerEntry(id: id, name: "", url: trimmedURL)
         let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
         // A new address or key is untested as far as the last Test knows.
-        if entry.url != trimmedURL || trimmedKey != savedKey { entry.tested = nil; report.tested = nil }
+        if entry.url != trimmedURL || trimmedKey != savedKey {
+            entry.tested = nil
+            report = TestReport()
+        }
         entry.url = trimmedURL
         let typed = name.trimmingCharacters(in: .whitespaces)
         entry.name = typed.isEmpty ? ServerEntry.name(for: trimmedURL) : typed
