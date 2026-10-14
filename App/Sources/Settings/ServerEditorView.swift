@@ -15,8 +15,7 @@ struct ServerEditorView: View {
     @State private var key = ""
     /// The key as the Keychain holds it, so only a real change is saved and retries parked uploads.
     @State private var savedKey = ""
-    @State private var tested: ServerEntry.Tested?
-    @State private var result: String?
+    @State private var report = TestReport()
     @State private var testing = false
     @State private var confirmingDelete = false
     @State private var deleted = false
@@ -40,10 +39,10 @@ struct ServerEditorView: View {
             Section {
                 Button(testing ? "Testing…" : "Test") { Task { await test() } }
                     .disabled(testing || url.isEmpty || key.isEmpty)
-                if let result {
+                if let result = report.result {
                     Text(result).font(.footnote)
                 }
-                if let tested {
+                if let tested = report.tested {
                     ForEach(Self.abilities(tested), id: \.self) { line in
                         Label(line.text, systemImage: line.allowed ? "checkmark.circle" : "xmark.circle")
                             .font(.footnote)
@@ -88,7 +87,7 @@ struct ServerEditorView: View {
         guard let entry = ServerSettings.book.server(id) else { return }
         name = entry.name
         url = entry.url
-        tested = entry.tested
+        report.tested = entry.tested
         savedKey = KeyStore.key(id) ?? ""
         key = savedKey
     }
@@ -97,16 +96,19 @@ struct ServerEditorView: View {
         let trimmedURL = url.trimmingCharacters(in: .whitespaces)
         var book = ServerSettings.book
         var entry = book.server(id) ?? ServerEntry(id: id, name: "", url: trimmedURL)
-        // A new address is a new server as far as the last Test knows.
-        if entry.url != trimmedURL { entry.tested = nil; tested = nil }
+        let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A new address or key is untested as far as the last Test knows.
+        if entry.url != trimmedURL || trimmedKey != savedKey {
+            entry.tested = nil
+            report = TestReport()
+        }
         entry.url = trimmedURL
         let typed = name.trimmingCharacters(in: .whitespaces)
         entry.name = typed.isEmpty ? ServerEntry.name(for: trimmedURL) : typed
-        if let tested { entry.tested = tested }
+        if let tested = report.tested { entry.tested = tested }
         let changed = book.server(id) != entry
         book.upsert(entry)
         if changed { ServerSettings.save(book) }
-        let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
         let keyChanged = trimmedKey != savedKey && KeyStore.save(trimmedKey, server: id)
         if keyChanged { savedKey = trimmedKey }
         // A new key or URL may unblock uploads that were refused with the old one.
@@ -129,7 +131,8 @@ struct ServerEditorView: View {
         testing = true
         defer { testing = false }
         guard let base = URL(string: url.trimmingCharacters(in: .whitespaces)) else {
-            result = "That is not a URL."
+            report.failed("That is not a URL.")
+            forgetTest()
             return
         }
         // The key as saved: a pasted trailing newline must not fail the Test of a key that works.
@@ -137,6 +140,31 @@ struct ServerEditorView: View {
         do {
             let info = try await probe.server()
             let me = try await probe.keyInfo()
+            report.passed(info, me)
+            save()
+        } catch {
+            report.failed(error)
+            forgetTest()
+        }
+    }
+
+    /// A failed Test also empties the server list's line, which would otherwise still say what the
+    /// last good Test found.
+    private func forgetTest() {
+        var book = ServerSettings.book
+        guard var entry = book.server(id), entry.tested != nil else { return }
+        entry.tested = nil
+        book.upsert(entry)
+        ServerSettings.save(book)
+    }
+
+    /// What the last Test said: the line under the button and what the key may do. A failed Test
+    /// leaves no abilities, so a refused key never keeps showing what the last good one could do.
+    struct TestReport: Equatable {
+        var tested: ServerEntry.Tested?
+        var result: String?
+
+        mutating func passed(_ info: ServerInfo, _ me: KeyInfo) {
             tested = ServerEntry.Tested(
                 version: info.version, mode: info.mode, keyName: me.name ?? me.id, scopes: me.scopes,
                 live: info.supportsLive, liveEngines: info.liveEngines)
@@ -144,13 +172,21 @@ struct ServerEditorView: View {
                 ? "live text with \(info.liveEngines.joined(separator: ", "))"
                 : "no live text on this server"
             result = "akou \(info.version ?? "?") (\(info.mode ?? "?")), key \(me.name ?? me.id) (\(me.scopes.joined(separator: ", "))), \(live)"
-            save()
-        } catch let f as Endpoint.Failure {
-            result = "Refused: \(f). Use https, or plain http only to a private address."
-        } catch ServerProbe.Failure.status(401, _) {
-            result = "The server refused the key: it is mistyped or was revoked."
-        } catch {
-            result = "Failed: \(error.localizedDescription)"
+        }
+
+        mutating func failed(_ error: Error) {
+            if let f = error as? Endpoint.Failure {
+                failed("Refused: \(f). Use https, or plain http only to a private address.")
+            } else if case .status(401, _)? = error as? ServerProbe.Failure {
+                failed("The server refused the key: it is mistyped or was revoked.")
+            } else {
+                failed("Failed: \(error.localizedDescription)")
+            }
+        }
+
+        mutating func failed(_ message: String) {
+            tested = nil
+            result = message
         }
     }
 

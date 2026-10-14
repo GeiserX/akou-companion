@@ -20,7 +20,14 @@ final class RecordingPlayer {
 
     private(set) var source: Source = .none
     private(set) var time: Double = 0
-    private(set) var duration: Double?
+    /// The length the server gives (a call part's `fileSeconds`, a job's `duration_s`, a
+    /// dictation's `seconds`), set by the screen when it knows one.
+    var knownLength: Double?
+    /// AVFoundation's length, read when the item is ready. For an Ogg Opus it is an estimate from
+    /// the pages and can be far off: 18:38 for a call part of 11:10.
+    private(set) var estimatedLength: Double?
+    /// The length shown: the server's, else AVFoundation's estimate.
+    var duration: Double? { Self.length(known: knownLength, estimated: estimatedLength) }
     private(set) var playing = false
     /// Why the audio cannot play, in words.
     private(set) var problem: String?
@@ -32,6 +39,12 @@ final class RecordingPlayer {
     /// A seek asked for before the item could play, made once it can.
     @ObservationIgnored private var pendingSeek: Double?
     @ObservationIgnored private var statusObservation: NSKeyValueObservation?
+
+    /// The server's length when it gave a usable one, else the player's estimate.
+    static func length(known: Double?, estimated: Double?) -> Double? {
+        if let known, known.isFinite, known > 0 { return known }
+        return estimated
+    }
 
     /// Sets up the player for a job. `local` is the phone's copy when it has one.
     func load(jobId: String, keptOnServer: Bool, local: URL?, client: JobsClient?) {
@@ -47,9 +60,10 @@ final class RecordingPlayer {
 
     /// Sets up the player for an audio `path` on a server, answered with `request` (the server's
     /// client's `audioRequest(path:)`), or the phone's `local` copy when it has one. `missing` says
-    /// why nothing plays when there is neither.
-    func load(path: String?, local: URL? = nil, request: (@Sendable (String) throws -> URLRequest)?, missing: String) {
+    /// why nothing plays when there is neither. `length` is the server's length of that audio.
+    func load(path: String?, local: URL? = nil, length: Double? = nil, request: (@Sendable (String) throws -> URLRequest)?, missing: String) {
         stop()
+        knownLength = length
         let item: AVPlayerItem
         if let local, FileManager.default.fileExists(atPath: local.path) {
             source = .local(local)
@@ -94,7 +108,7 @@ final class RecordingPlayer {
         guard let current = player?.currentItem, ObjectIdentifier(current) == item else { return }
         switch status {
         case .readyToPlay:
-            duration = seconds.isFinite ? seconds : nil
+            estimatedLength = seconds.isFinite ? seconds : nil
             if let s = pendingSeek {
                 pendingSeek = nil
                 seek(to: s)
@@ -146,7 +160,8 @@ final class RecordingPlayer {
         loader = nil
         playing = false
         time = 0
-        duration = nil
+        knownLength = nil
+        estimatedLength = nil
         problem = nil
         pendingSeek = nil
     }

@@ -43,7 +43,7 @@ struct CallDetailView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Notes").font(.headline)
                         ForEach(notes) { n in
-                            Text("• \(n.text)").font(.callout)
+                            Text(Self.bulleted(n.text)).font(.callout)
                         }
                     }
                 }
@@ -120,7 +120,18 @@ struct CallDetailView: View {
             player.load(path: nil, request: nil, missing: "This call has no audio.")
             return
         }
-        player.load(path: HistoryClient.callAudioPath(callId, part: n), request: { try client.audioRequest(path: $0) }, missing: "")
+        let length = call?.parts.first(where: { $0.part == n })?.ended?.fileSeconds
+        player.load(path: HistoryClient.callAudioPath(callId, part: n), length: length, request: { try client.audioRequest(path: $0) }, missing: "")
+    }
+
+    /// A note as one bullet. akou's notepad often starts a note with its own list marker, which
+    /// takes the bullet's place instead of showing as a second one ("• - text").
+    static func bulleted(_ note: String) -> String {
+        let t = note.trimmingCharacters(in: .whitespaces)
+        for marker in ["- ", "* ", "• "] where t.hasPrefix(marker) {
+            return "• " + t.dropFirst(marker.count).trimmingCharacters(in: .whitespaces)
+        }
+        return "• " + t
     }
 
     /// Plays from the line: `a0` seconds into its part, or the wall-clock offset from an older akou.
@@ -213,8 +224,9 @@ struct DictationDetailView: View {
             return
         }
         do {
-            dictation = try await client.dictation(dictationId)
-            player.load(path: HistoryClient.dictationAudioPath(dictationId), request: { try client.audioRequest(path: $0) }, missing: "")
+            let d = try await client.dictation(dictationId)
+            dictation = d
+            player.load(path: HistoryClient.dictationAudioPath(dictationId), length: d.seconds, request: { try client.audioRequest(path: $0) }, missing: "")
         } catch {
             status = LibraryStore.describe(error)
         }

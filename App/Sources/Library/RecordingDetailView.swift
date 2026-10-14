@@ -108,6 +108,8 @@ struct RecordingDetailView: View {
                 do {
                     let result = try await client.result(jobId)
                     self.result = result
+                    // The player's own length for an Ogg Opus is an estimate; the job's is exact.
+                    if let length = result.durationS { player.knownLength = length }
                     if isRecordTo && LibraryStore.isCompanion(job) { SnapshotWriter.transcriptLoaded(job: job, result: result) }
                     return
                 } catch JobsClient.Failure.status(409, _, _) {
