@@ -147,13 +147,14 @@ final class BackgroundUploader: NSObject {
         await scheduleWake()
     }
 
-    /// One client per server whose URL and key are set and allowed. A server missing here keeps
+    /// One client per server whose URL and key are set and allowed, never the demo's. A server missing here keeps
     /// its recordings waiting; one removed from the settings parks them (`UploadQueue.Routing`).
     private func clients() -> (routing: UploadQueue.Routing, clients: [UUID: JobsClient]) {
         let book = ServerSettings.book
         var clients: [UUID: JobsClient] = [:]
         for entry in book.servers {
-            guard let url = entry.baseURL, let key = KeyStore.key(entry.id), !key.isEmpty,
+            // The demo's server lives in the app and takes no uploads: what waits for it stays waiting.
+            guard !DemoServer.handles(entry.baseURL), let url = entry.baseURL, let key = KeyStore.key(entry.id), !key.isEmpty,
                   (try? Endpoint.api(url, "/v1/jobs")) != nil else { continue }
             clients[entry.id] = JobsClient(baseURL: url, key: key)
         }

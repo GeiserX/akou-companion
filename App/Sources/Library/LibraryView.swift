@@ -24,8 +24,13 @@ struct LibraryView: View {
                 if let server = selected {
                     ServerLibraryView(server: server, book: book).id(server.id)
                 } else {
-                    ContentUnavailableView("No server yet", systemImage: "server.rack",
-                        description: Text("Add an akou server in Settings. Recordings made before then wait on this phone."))
+                    ContentUnavailableView {
+                        Label("No server yet", systemImage: "server.rack")
+                    } description: {
+                        Text("Add an akou server in Settings. Recordings made before then wait on this phone.")
+                    } actions: {
+                        Button("Try the demo") { DemoMode.enter() }
+                    }
                 }
             }
             .navigationTitle(selected?.name ?? "Recordings")
@@ -174,7 +179,7 @@ private struct WaitingSection: View {
                 ForEach(items, id: \.recordingID) { item in
                     VStack(alignment: .leading, spacing: 6) {
                         WaitingRow(item: item)
-                        if item.waitsForAServer && server.canBeRecordTo {
+                        if item.waitsForAServer && server.canBeRecordTo && !DemoMode.isDemo(server) {
                             Button("Send to \(server.name)") {
                                 Task {
                                     await BackgroundUploader.shared.send(item.recordingID, to: server.id)

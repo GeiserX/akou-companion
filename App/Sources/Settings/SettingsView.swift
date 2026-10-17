@@ -23,6 +23,15 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            if book.servers.contains(where: DemoMode.isDemo) {
+                Section {
+                    Button("Leave the demo", role: .destructive) { DemoMode.leave() }
+                } header: {
+                    Text("Demo")
+                } footer: {
+                    Text("The demo server and its recordings live on this iPhone only. Leave the demo to add your own akou server.")
+                }
+            }
             Section {
                 ForEach(book.servers) { entry in
                     NavigationLink {
@@ -35,6 +44,9 @@ struct SettingsView: View {
                     ServerEditorView(id: newServerID, isNew: true)
                 } label: {
                     Label("Add a server", systemImage: "plus")
+                }
+                if book.servers.isEmpty {
+                    Button("Try the demo", systemImage: "play.rectangle.on.rectangle") { DemoMode.enter() }
                 }
                 if book.servers.contains(where: \.canBeRecordTo) {
                     Picker("Record to", selection: recordTo) {
