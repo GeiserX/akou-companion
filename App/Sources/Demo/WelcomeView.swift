@@ -64,6 +64,6 @@ struct DemoBanner: View {
         .font(.footnote)
         .padding(.horizontal)
         .padding(.vertical, 6)
-        .background(Color.orange.opacity(0.18))
+        .background(Color.orange.opacity(0.18), ignoresSafeAreaEdges: .top)
     }
 }

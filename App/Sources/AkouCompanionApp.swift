@@ -68,7 +68,16 @@ struct AkouCompanionApp: App {
         }
     }
 
+    /// The tabs, under the demo's banner while the demo is on. A stack rather than an inset, so
+    /// the navigation bars sit below the banner instead of under it.
     private var tabs: some View {
+        VStack(spacing: 0) {
+            if book.servers.contains(where: DemoMode.isDemo) { DemoBanner() }
+            tabView
+        }
+    }
+
+    private var tabView: some View {
         TabView(selection: $selectedTab) {
             NavigationStack { RecordView() }
                 .tabItem { Label("Record", systemImage: "record.circle") }
@@ -85,9 +94,6 @@ struct AkouCompanionApp: App {
         // akou-companion://recording/<job id>, which the Library opens on that recording.
         .onOpenURL { url in
             if let screen = Self.screen(for: url) { selectedTab = screen }
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if book.servers.contains(where: DemoMode.isDemo) { DemoBanner() }
         }
     }
 
