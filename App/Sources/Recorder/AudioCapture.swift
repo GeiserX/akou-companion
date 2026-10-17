@@ -86,9 +86,15 @@ final class AudioCapture: SampleSource {
         guard format.sampleRate > 0, format.channelCount > 0,
               let converter = AVAudioConverter(from: format, to: Self.target) else { throw Failure.noInput }
         converter.downmix = true
+        input.installTap(onBus: 0, bufferSize: 4096, format: format, block: Self.tap(converter, sink: sink))
+    }
+
+    /// The tap's block. It runs on AVFoundation's audio thread, so it is made outside the main
+    /// actor: a closure written inside `installTap` inherits the main actor, and Swift 6 traps
+    /// (`dispatch_assert_queue`) on the first buffer.
+    nonisolated static func tap(_ converter: AVAudioConverter, sink: @escaping @Sendable ([Float]) -> Void) -> AVAudioNodeTapBlock {
         let box = ConverterBox(converter)
-        let sink = self.sink
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
+        return { buffer, _ in
             if let samples = box.convert(buffer) { sink(samples) }
         }
     }
