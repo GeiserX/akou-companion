@@ -351,3 +351,13 @@ public actor LiveSession {
         }
     }
 }
+
+/// What the recorder needs from live text: `LiveSession` against a server, `DemoLiveText` in the demo.
+public protocol LiveText: AnyObject, Sendable {
+    var events: AsyncStream<LiveSession.Event> { get }
+    func start() async
+    func send(page: Data, endsAt end: Double) async
+    func stop() async
+}
+
+extension LiveSession: LiveText {}

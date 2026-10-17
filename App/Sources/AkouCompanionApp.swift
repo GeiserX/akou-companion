@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import AkouClient
 import SwiftUI
 
 @main
@@ -6,6 +7,8 @@ struct AkouCompanionApp: App {
     // Opens the upload queue at launch and takes the system's wake for finished background uploads.
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var selectedTab = Screen.record
+    @AppStorage(ServerBook.defaultsKey) private var bookJSON = ""
+    @AppStorage(DemoMode.welcomedKey) private var welcomed = false
 
     enum Screen: Hashable {
         case record
@@ -21,8 +24,13 @@ struct AkouCompanionApp: App {
         recorder.recordTarget = { ServerSettings.recordTo }
         recorder.recordToID = { ServerSettings.book.recordTo }
         // Every finished file goes to the upload queue for the server it was recorded for, and
-        // shows under the Library's waiting rows.
+        // shows under the Library's waiting rows. One made in the demo stays in the demo.
         recorder.onFinished = { finished in
+            if DemoMode.isDemo(finished.serverID) {
+                DemoMode.keep(finished)
+                Task { await LibraryStore.shared.refresh() }
+                return
+            }
             Task {
                 await BackgroundUploader.shared.enqueue(
                     recordingID: finished.id.uuidString, file: finished.fileURL, title: finished.title,
@@ -36,27 +44,56 @@ struct AkouCompanionApp: App {
         // No recording outlives its process, so a "recording" left in the App Group by a killed app
         // is stale: clear it, or the record control would offer Stop for nothing.
         RecordingStatus.set(recording: false)
+        DemoMode.start()
     }
+
+    private var book: ServerBook { ServerBook.decode(bookJSON) ?? ServerBook() }
 
     var body: some Scene {
         WindowGroup {
-            TabView(selection: $selectedTab) {
-                NavigationStack { RecordView() }
-                    .tabItem { Label("Record", systemImage: "record.circle") }
-                    .tag(Screen.record)
-                // LibraryView holds its own NavigationStack, driven by LibraryRouter.
-                LibraryView()
-                    .tabItem { Label("Recordings", systemImage: "list.bullet") }
-                    .tag(Screen.library)
-                NavigationStack { SettingsView() }
-                    .tabItem { Label("Settings", systemImage: "gear") }
-                    .tag(Screen.settings)
+            if !welcomed && book.servers.isEmpty {
+                WelcomeView { choice in
+                    switch choice {
+                    case .addServer: selectedTab = .settings
+                    case .demo:
+                        DemoMode.enter()
+                        selectedTab = .library
+                    case .skip: selectedTab = .record
+                    }
+                    welcomed = true
+                }
+            } else {
+                tabs
             }
-            // The Live Activity opens akou-companion://record, a recent-recordings row
-            // akou-companion://recording/<job id>, which the Library opens on that recording.
-            .onOpenURL { url in
-                if let screen = Self.screen(for: url) { selectedTab = screen }
-            }
+        }
+    }
+
+    /// The tabs, under the demo's banner while the demo is on. A stack rather than an inset, so
+    /// the navigation bars sit below the banner instead of under it.
+    private var tabs: some View {
+        VStack(spacing: 0) {
+            if book.servers.contains(where: DemoMode.isDemo) { DemoBanner() }
+            tabView
+        }
+    }
+
+    private var tabView: some View {
+        TabView(selection: $selectedTab) {
+            NavigationStack { RecordView() }
+                .tabItem { Label("Record", systemImage: "record.circle") }
+                .tag(Screen.record)
+            // LibraryView holds its own NavigationStack, driven by LibraryRouter.
+            LibraryView()
+                .tabItem { Label("Recordings", systemImage: "list.bullet") }
+                .tag(Screen.library)
+            NavigationStack { SettingsView() }
+                .tabItem { Label("Settings", systemImage: "gear") }
+                .tag(Screen.settings)
+        }
+        // The Live Activity opens akou-companion://record, a recent-recordings row
+        // akou-companion://recording/<job id>, which the Library opens on that recording.
+        .onOpenURL { url in
+            if let screen = Self.screen(for: url) { selectedTab = screen }
         }
     }
 

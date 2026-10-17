@@ -12,6 +12,8 @@ public enum AkouSession {
         let c = configuration
         c.urlCache = nil
         c.requestCachePolicy = .reloadIgnoringLocalCacheData
+        // The demo's server answers its own host inside the app and lets every other request by.
+        c.protocolClasses = [DemoServer.self] + (c.protocolClasses ?? [])
         return URLSession(configuration: c, delegate: SameOriginRedirects(), delegateQueue: nil)
     }
 

@@ -54,7 +54,7 @@ final class RecordingController: ObservableObject {
         let id: UUID
         let file: RecordingFile
         let capture: any SampleSource
-        let live: LiveSession?
+        let live: (any LiveText)?
         let startedAt: Date
         let workspace: String?
         let title: String?
@@ -187,8 +187,10 @@ final class RecordingController: ObservableObject {
         return finished
     }
 
-    private func makeLiveSession(_ target: RecordTarget?, file: RecordingFile, language: String, model: String) -> LiveSession? {
+    private func makeLiveSession(_ target: RecordTarget?, file: RecordingFile, language: String, model: String) -> (any LiveText)? {
         guard serverSupportsLive != false, let target else { return nil }
+        // The demo's server has no socket: its live text is a fixed script, made on the phone.
+        if DemoServer.handles(target.url) { return DemoLiveText() }
         return LiveSession(
             baseURL: target.url, key: target.key, hello: LiveHello(language: language, model: model), headerPages: file.headerPages
         )

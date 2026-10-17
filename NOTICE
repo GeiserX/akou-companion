@@ -24,3 +24,11 @@ When you convey a modified version, you may remove this additional permission
 from your version, as section 7 allows; the work is then under the plain
 GPL-3.0-or-later. Contributions to this repository are accepted under the same
 terms, including this permission.
+
+Demo recordings
+
+The three sample readings in App/Sources/Demo/Samples (the opening lines of the
+Gettysburg Address and of the Declaration of Independence) are cut from
+LibriVox recordings read by Jim Cadwell, which LibriVox places in the public
+domain: https://archive.org/details/gettysburg_address4_librivox and
+https://archive.org/details/declaration_of_independence_librivox
