@@ -15,3 +15,10 @@ App/Config/Local.xcconfig
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Android
+android/.gradle/
+android/.kotlin/
+android/build/
+android/*/build/
+android/local.properties
