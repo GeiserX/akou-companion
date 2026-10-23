@@ -30,7 +30,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import org.junit.Assume
 
@@ -52,8 +51,8 @@ class LiveSessionTests {
         http.connectionPool.evictAll()
     }
 
-    private fun session(url: okhttp3.HttpUrl, pages: PageMaker, hello: LiveHello = LiveHello(), backoff: Duration) =
-        LiveSession(url, "ak_test", hello, pages.headers, LiveSession.Policy(backoff = listOf(backoff)), http)
+    private fun session(base: String, pages: PageMaker, hello: LiveHello = LiveHello(), backoff: Duration) =
+        LiveSession(base, "ak_test", hello, pages.headers, LiveSession.Policy(backoff = listOf(backoff)), http)
 
     @Test
     fun testTooFastReopensOnceWithTheHeadersThenTheCurrentPageAndNoBacklog() = runBlocking {
@@ -251,10 +250,9 @@ class LiveSessionTests {
         val base = System.getenv("AKOU_URL")
         val key = System.getenv("AKOU_API_KEY")
         Assume.assumeTrue("set AKOU_URL and AKOU_API_KEY to run against a real akou server", base != null && key != null)
-        val url = base!!.toHttpUrl().newBuilder().addPathSegments("v1/live").build()
         val all = OggPage.readAll(io.github.geiserx.akou.core.ogg.Fixtures.ffmpegFile())
         val encoded = all.map { it.encoded() }
-        val session = LiveSession(url, key!!, LiveHello(), encoded.take(2), client = http)
+        val session = LiveSession(base!!, key!!, LiveHello(), encoded.take(2), client = http)
         val log = EventLog(session.events)
         session.start()
         log.expect(60.seconds) { it.states.any { s -> s is State.Live } }

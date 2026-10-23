@@ -23,7 +23,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 
 /** What the recorder needs from live text: [LiveSession] against a server, the demo's scripted text in the demo. */
@@ -65,11 +64,11 @@ class LiveSession internal constructor(
     private val connector: suspend () -> LiveSocket,
 ) : LiveText {
     /**
-     * A session against [url], the live route (`/v1/live` under the server's base URL), with
+     * A session against the live route of the server at [base] (`Endpoint.live`), with
      * [headerPages] resent on every reopen.
      */
     constructor(
-        url: HttpUrl,
+        base: String,
         key: String,
         hello: LiveHello,
         headerPages: List<ByteArray>,
@@ -79,7 +78,7 @@ class LiveSession internal constructor(
         policy,
         CoroutineScope(SupervisorJob() + Dispatchers.Default.limitedParallelism(1)),
         TimeSource.Monotonic,
-        { LiveClient.open(url, key, hello, headerPages, client, policy.pingInterval) },
+        { LiveClient.open(base, key, hello, headerPages, client, policy.pingInterval) },
     )
 
     sealed interface State {
