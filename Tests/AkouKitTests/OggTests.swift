@@ -133,8 +133,12 @@ final class OggOpusWriterTests: XCTestCase {
     }
 
     func testNoPageIsLargerThanAWebSocketFrame() throws {
-        // docs/PROTOCOL.md: a frame is at most 64 KB, and each page goes out as one frame.
-        let limit = 64 * 1024
+        // docs/PROTOCOL.md: a frame is at most 64 KB, and each page goes out as one frame. The
+        // writer refuses a lacing table past 255 entries, so no page it builds can pass the frame.
+        XCTAssertLessThanOrEqual(OggPage.headerLength + 255 + 255 * 255, 64 * 1024)
+        // The writer's own budget, about 650 bytes a page: 2 KB leaves room for VBR, and a change
+        // to packets per page or the bitrate that grows the pages shows up here.
+        let limit = 2 * 1024
         var writer = OggOpusWriter(encoder: try OpusEncoder(), serial: 7)
         var pages = try writer.headerPages()
         for n in 0..<(50 * 30) { // 30 seconds

@@ -35,7 +35,7 @@ final class ActivityController {
     func setLastLine(_ line: String) {
         guard line != content.lastLine else { return }
         content.lastLine = line
-        if throttle.offer(line, at: .now) != nil { return push() }
+        if throttle.offer(at: .now) { return push() }
         guard pendingLine == nil, let due = throttle.due else { return } // the scheduled push takes the newest line
         pendingLine = Task { [weak self] in
             try? await Task.sleep(until: due)
@@ -75,38 +75,36 @@ final class ActivityController {
     }
 }
 
-/// When a new closed line may reach the Live Activity: at most one every `interval`, the newest
-/// line held until its turn. Every push (a state change goes at once) takes the held line with it
-/// and starts the interval again. Pure, so the tests drive it with their own instants.
+/// When a new closed line may reach the Live Activity: at most one every `interval`. A line that
+/// comes too soon waits for `due`; the controller has already put the newest line in its content,
+/// so the push at `due` shows that one. Every push (a state change goes at once) takes the waiting
+/// line with it and starts the interval again. Pure, so the tests drive it with their own instants.
 struct LineThrottle {
     static let interval: Duration = .seconds(5)
 
     private(set) var lastPush: ContinuousClock.Instant?
-    /// The newest line waiting for its turn.
-    private(set) var held: String?
+    /// A line came too soon and waits for `due`.
+    private(set) var lineWaiting = false
 
-    /// A new line at `now`: the line to push now, or nil while it waits for `due`.
-    mutating func offer(_ line: String, at now: ContinuousClock.Instant) -> String? {
-        if held == nil, lastPush.map({ $0.duration(to: now) >= Self.interval }) ?? true {
+    /// A new line at `now`: true when it may go now (the caller pushes), false while it waits.
+    mutating func offer(at now: ContinuousClock.Instant) -> Bool {
+        if !lineWaiting, lastPush.map({ $0.duration(to: now) >= Self.interval }) ?? true {
             lastPush = now
-            return line
+            return true
         }
-        held = line
-        return nil
+        lineWaiting = true
+        return false
     }
 
-    /// When the held line goes, or nil with nothing held.
+    /// When the waiting line goes, or nil with nothing waiting.
     var due: ContinuousClock.Instant? {
-        guard held != nil, let lastPush else { return nil }
+        guard lineWaiting, let lastPush else { return nil }
         return lastPush + Self.interval
     }
 
-    /// A push went out at `now`, for a state change or for the held line; returns the held line
-    /// it carries.
-    @discardableResult
-    mutating func push(at now: ContinuousClock.Instant) -> String? {
+    /// A push went out at `now`, for a state change or for the waiting line.
+    mutating func push(at now: ContinuousClock.Instant) {
         lastPush = now
-        defer { held = nil }
-        return held
+        lineWaiting = false
     }
 }

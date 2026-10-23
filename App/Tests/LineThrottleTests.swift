@@ -10,45 +10,60 @@ final class LineThrottleTests: XCTestCase {
 
     func testTheFirstLineGoesAtOnce() {
         var t = LineThrottle()
-        XCTAssertEqual(t.offer("one", at: at(0)), "one")
-        XCTAssertNil(t.held)
+        XCTAssertTrue(t.offer(at: at(0)))
+        XCTAssertFalse(t.lineWaiting)
     }
 
-    func testALineWithinFiveSecondsIsHeldUntilItsTurn() {
+    func testALineWithinFiveSecondsWaitsForItsTurn() {
         var t = LineThrottle()
         t.push(at: at(0)) // the activity started
-        XCTAssertNil(t.offer("early", at: at(4.9)))
-        XCTAssertEqual(t.held, "early")
+        XCTAssertFalse(t.offer(at: at(4.9)))
+        XCTAssertTrue(t.lineWaiting)
         XCTAssertEqual(t.due, at(5))
     }
 
     func testALineAfterFiveSecondsGoes() {
         var t = LineThrottle()
         t.push(at: at(0))
-        XCTAssertEqual(t.offer("late", at: at(5)), "late")
+        XCTAssertTrue(t.offer(at: at(5)))
         XCTAssertNil(t.due)
-        XCTAssertNil(t.offer("too soon", at: at(9)), "the interval starts again at each push")
+        XCTAssertFalse(t.offer(at: at(9)), "the interval starts again at each push")
     }
 
-    func testTheHeldLineThatGoesIsTheNewest() {
+    func testAWaitingLineKeepsItsSlot() {
         var t = LineThrottle()
         t.push(at: at(0))
-        XCTAssertNil(t.offer("a", at: at(1)))
-        XCTAssertNil(t.offer("b", at: at(2)))
-        XCTAssertNil(t.offer("c", at: at(6)), "a line held earlier keeps the slot; the newest replaces it")
+        XCTAssertFalse(t.offer(at: at(1)))
+        XCTAssertFalse(t.offer(at: at(2)))
+        XCTAssertFalse(t.offer(at: at(6)), "a line waiting since earlier keeps the slot at 5 s")
         XCTAssertEqual(t.due, at(5))
-        XCTAssertEqual(t.push(at: at(5)), "c")
-        XCTAssertNil(t.held)
+        t.push(at: at(5))
+        XCTAssertFalse(t.lineWaiting)
     }
 
-    func testAStateChangeGoesAtOnceAndCarriesTheHeldLine() {
+    func testAStateChangeGoesAtOnceAndTakesTheWaitingLine() {
         var t = LineThrottle()
         t.push(at: at(0))
-        XCTAssertNil(t.offer("held", at: at(1)))
+        XCTAssertFalse(t.offer(at: at(1)))
         // Pause or resume pushes right away, whatever the interval says.
-        XCTAssertEqual(t.push(at: at(2)), "held")
+        t.push(at: at(2))
         XCTAssertNil(t.due)
-        XCTAssertNil(t.offer("next", at: at(3)), "the state push restarted the interval")
+        XCTAssertFalse(t.offer(at: at(3)), "the state push restarted the interval")
         XCTAssertEqual(t.due, at(7))
+    }
+
+    /// The push at `due` sends the controller's content, so that content must already hold the
+    /// newest line, even one that came too soon to go at once.
+    @MainActor
+    func testTheControllerShowsTheNewestLineEvenWhileItWaits() {
+        let c = ActivityController()
+        c.start(title: "t", startedAt: .now, liveText: true)
+        defer { c.end() }
+        c.setLastLine("one")
+        c.setLastLine("two")
+        c.setLastLine("three")
+        XCTAssertEqual(c.content.lastLine, "three")
+        c.setPaused(true, startedAt: .now)
+        XCTAssertEqual(c.content.lastLine, "three", "the pause push carries the waiting line")
     }
 }

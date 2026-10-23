@@ -54,7 +54,11 @@ public final class AuthorizedAudioLoader: NSObject, AVAssetResourceLoaderDelegat
     public static func path(in url: URL) -> String? {
         guard url.scheme == scheme, url.host(percentEncoded: false) == "akou" else { return nil }
         let p = url.path(percentEncoded: true)
-        let dotSegment = p.split(separator: "/").contains { $0.removingPercentEncoding == ".." }
+        // A raw segment that decodes to `..`, or to a path holding a `..` segment (`%2F..%2F`),
+        // would climb out of `/v1/` on a server that decodes before it cleans the path.
+        let dotSegment = p.split(separator: "/").contains {
+            $0.removingPercentEncoding?.split(separator: "/").contains("..") == true
+        }
         guard p.hasPrefix("/v1/"), !dotSegment else { return nil }
         return p
     }
