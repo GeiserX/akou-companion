@@ -83,13 +83,15 @@ class RedirectTests {
         assertFalse(AkouHttp.allowsRedirect(base, null))
     }
 
-    /** A sleeping Mac shows its line after 15 s: the probe's requests run under a 15 s read timeout. */
+    /** A sleeping Mac shows its line after 15 s: probes and history reads run under a 15 s read timeout. */
     @Test
     fun testProbesAndHistoryReadsGiveUpAfter15Seconds() = runBlocking<Unit> {
         val stub = RedirectStub("")
         runCatching { ServerProbe("https://other.example.com", "k", client(stub)).keyInfo() }
         runCatching { ServerProbe("https://other.example.com", "k", client(stub)).server() }
-        assertEquals(listOf(15_000, 15_000), stub.seen.map { it.readTimeoutMillis })
+        runCatching { HistoryClient("https://other.example.com", "k", client(stub)).calls() }
+        runCatching { HistoryClient("https://other.example.com", "k", client(stub)).dictations() }
+        assertEquals(listOf(15_000, 15_000, 15_000, 15_000), stub.seen.map { it.readTimeoutMillis })
     }
 
     /**

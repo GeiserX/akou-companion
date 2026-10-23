@@ -136,6 +136,28 @@ class OggOpusWriterTests {
         assertFailsWith<AssertionError> { assertFitsOneFrame(biggest) }
     }
 
+    /**
+     * The Swift test of the same name: PROTOCOL.md caps a frame at 64 KB and each page goes out as
+     * one frame. Ogg's own page limit is not that guarantee (see testNoWrittenPageExceedsTheFrameLimit:
+     * the largest page Ogg can carry is over 64000 bytes). The writer's budget is about 650 bytes a
+     * page, so 30 s of audio must stay under
+     * 2 KB a page; a change to packets per page that grows the pages shows up here. The fixture's
+     * packets are replayed in a loop (they are real 24 kbit/s libopus packets).
+     */
+    @Test
+    fun testNoPageIsLargerThanAWebSocketFrame() {
+        val limit = 2 * 1024
+        val fixture = FixtureOpusEncoder.fixturePackets()
+        val writer = OggOpusWriter(FixtureOpusEncoder(List(50 * 30 + 1) { fixture[it % fixture.size] }), 7u)
+        val pages = ArrayList<ByteArray>()
+        pages += writer.headerPages()
+        for (n in 0 until 50 * 30) writer.append(sine(n))?.let { pages += it } // 30 seconds
+        pages += writer.finish()
+        assertEquals(2 + 150 + 1, pages.size)
+        pages.forEachIndexed { i, page -> assertTrue(page.size <= limit, "page $i is ${page.size} bytes") }
+        assertEquals(pages.size, OggPage.readAll(pages.fold(ByteArray(0)) { acc, p -> acc + p }).size)
+    }
+
     /** An independent decoder reads the writer's file: ffprobe's demuxer and libopus. */
     @Test
     fun testFfprobeReadsTheWritersFile() {
@@ -149,6 +171,10 @@ class OggOpusWriterTests {
         val reference = probe(ffprobe, Fixtures.ffmpegFile())
         assertNotNull(duration(ours), ours)
         assertEquals(duration(reference), duration(ours))
+        // The fake encoder replays the fixture, so the duration above matches by construction. Pin
+        // the granule it comes from as well: pre-skip plus one 960-sample packet per input frame.
+        // A real encoder's lookahead is checked on the device, in `opus`.
+        assertEquals(312L + 50L * 960L, OggPage.readAll(file).last().granulePosition)
     }
 
     /** Positive control for the CI rule: with no ffprobe anywhere and CI=true, the test fails, never skips. */

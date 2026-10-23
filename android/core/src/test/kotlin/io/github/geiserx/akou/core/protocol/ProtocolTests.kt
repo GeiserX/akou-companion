@@ -65,6 +65,18 @@ class ProtocolTests {
         assertTrue(dropped.isEmpty())
     }
 
+    /**
+     * Not in the Swift test, pinned so a change is deliberate: Kotlin's `coerceInputValues` reads an
+     * unknown codec as the default, where Swift's decoder fails. The phone only ever encodes a hello,
+     * so the wire is the same either way.
+     */
+    @Test
+    fun testAnUnknownCodecDecodesAsTheDefault() {
+        val h = AkouJson.decodeFromString(LiveHello.serializer(), """{"v":1,"codec":"flac","language":"es","model":"auto"}""")
+        assertEquals(LiveCodec.OGG_OPUS, h.codec)
+        assertEquals("es", h.language)
+    }
+
     @Test
     fun testStopOnTheWire() {
         assertEquals("""{"type":"stop"}""", LiveClientMessage.Stop.json())

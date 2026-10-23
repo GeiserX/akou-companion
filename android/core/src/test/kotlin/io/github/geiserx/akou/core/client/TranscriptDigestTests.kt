@@ -61,6 +61,17 @@ class TranscriptDigestTests {
         assertEquals("Hello there. How are you?", TranscriptDigest.opening("  Hello\n\nthere.   How   are you? ", limit = 600))
     }
 
+    /**
+     * Not in the Swift test: whitespace is Unicode's White_Space, as Swift's `isWhitespace`, not the
+     * JVM's `Char.isWhitespace`. U+0085 (next line) separates words; U+001C (file separator) does not.
+     */
+    @Test
+    fun testWhitespaceIsUnicodeWhiteSpace() {
+        assertEquals("a b", TranscriptDigest.collapse("a\u0085b"))
+        assertEquals("a\u001Cb", TranscriptDigest.collapse("a\u001Cb"))
+        assertEquals("a b", TranscriptDigest.collapse("\u3000a\u00A0\u2028b\u0085"))
+    }
+
     @Test
     fun testWordsWithNullTimesStillCount() {
         // A result from an engine that gives no word times (akou's JobWord: s, e and c are null).

@@ -48,16 +48,22 @@ object TranscriptDigest {
         return chars.subList(0, room).joinToString("") + "…"
     }
 
-    /** Runs of whitespace become one space; the ends are trimmed. */
+    /**
+     * Runs of whitespace become one space; the ends are trimmed. Whitespace is Unicode's
+     * White_Space, as Swift's `isWhitespace`, not the JVM's `Char.isWhitespace`.
+     */
     internal fun collapse(text: String): String = buildString {
         var gap = false
-        for (ch in text) {
-            if (ch.isWhitespace()) {
+        var i = 0
+        while (i < text.length) {
+            val cp = text.codePointAt(i)
+            i += Character.charCount(cp)
+            if (LiveTranscript.isWhiteSpace(cp)) {
                 gap = isNotEmpty()
             } else {
                 if (gap) append(' ')
                 gap = false
-                append(ch)
+                appendCodePoint(cp)
             }
         }
     }

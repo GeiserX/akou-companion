@@ -43,6 +43,8 @@ class FakeAkouHttp : Dispatcher(), Closeable {
         val fields: Map<String, String>,
         val fileName: String?,
         val fileBytes: ByteArray?,
+        /** The file part's own Content-Type. */
+        val fileContentType: String? = null,
     )
 
     data class StoredJob(
@@ -89,7 +91,7 @@ class FakeAkouHttp : Dispatcher(), Closeable {
         if (type != null && type.startsWith("multipart/form-data")) {
             val fields = mutableMapOf<String, String>()
             for (p in parts(body, type.substringAfterLast("boundary="))) {
-                if (p.fileName != null) seen = seen.copy(fileName = p.fileName, fileBytes = p.value)
+                if (p.fileName != null) seen = seen.copy(fileName = p.fileName, fileBytes = p.value, fileContentType = p.contentType)
                 else fields[p.name] = p.value.decodeToString()
             }
             seen = seen.copy(fields = fields)
@@ -177,7 +179,7 @@ class FakeAkouHttp : Dispatcher(), Closeable {
 
     private fun drop(): MockResponse = MockResponse.Builder().onResponseStart(SocketEffect.CloseSocket()).build()
 
-    data class Part(val name: String, val fileName: String?, val value: ByteArray)
+    data class Part(val name: String, val fileName: String?, val value: ByteArray, val contentType: String? = null)
 
     companion object {
         const val KEY = "ak_test"
@@ -204,7 +206,9 @@ class FakeAkouHttp : Dispatcher(), Closeable {
                 }
                 fun param(n: String): String? = Regex("""(?:^|[ ;])$n="([^"]*)"""").find(head)?.groupValues?.get(1)
                 val name = param("name") ?: continue
-                out += Part(name, param("filename"), value)
+                val contentType = head.lineSequence().firstOrNull { it.startsWith("Content-Type:", ignoreCase = true) }
+                    ?.substringAfter(':')?.trim()
+                out += Part(name, param("filename"), value, contentType)
             }
             return out
         }
