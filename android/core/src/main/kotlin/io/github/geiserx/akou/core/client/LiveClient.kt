@@ -17,7 +17,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
-import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -206,20 +205,20 @@ class LiveClient private constructor(
         val defaultClient: OkHttpClient by lazy { OkHttpClient() }
 
         /**
-         * Opens a session: connects to [url] (the live route, `/v1/live` under the server's base,
-         * built by the caller's endpoint rules) with [key] as a bearer on the upgrade, sends `hello`,
+         * Opens a session: connects to the live route of the server at [base] (`Endpoint.live`, so
+         * https always and http only to a private host) with [key] as a bearer on the upgrade, sends `hello`,
          * waits for `ready`, then sends [headerPages] (the OpusHead and OpusTags pages for `ogg-opus`).
          * [client] gets [pingInterval] on a derived client that shares its pool and dispatcher.
          */
         suspend fun open(
-            url: HttpUrl,
+            base: String,
             key: String,
             hello: LiveHello,
             headerPages: List<ByteArray>,
             client: OkHttpClient = defaultClient,
             pingInterval: Duration = 20.seconds,
         ): LiveClient {
-            val request = Request.Builder().url(url).header("Authorization", "Bearer $key").build()
+            val request = Request.Builder().url(Endpoint.live(base)).header("Authorization", "Bearer $key").build()
             val connection = Connection()
             val ws = client.newBuilder()
                 .pingInterval(pingInterval.inWholeMilliseconds, TimeUnit.MILLISECONDS)

@@ -40,11 +40,11 @@ class LiveClientTests {
     @Test
     fun testASessionFromHelloToClosed() = runBlocking {
         FakeLiveServer().use { server ->
-            val url = server.start()
+            val base = server.start()
             val writer = OggOpusWriter(FixtureOpusEncoder(), serial = 42u)
             val headers = writer.headerPages()
             val client = withTimeout(5.seconds) {
-                LiveClient.open(url, "ak_test", LiveHello(language = "es"), headers, http)
+                LiveClient.open(base, "ak_test", LiveHello(language = "es"), headers, http)
             }
             assertEquals(LiveReady(engine = "fake-live", lang = "auto", tierMs = 560, loadMs = 3), client.ready)
 
@@ -86,9 +86,9 @@ class LiveClientTests {
     @Test
     fun testABadKeyIsRefusedAtTheUpgrade() = runBlocking {
         FakeLiveServer().use { server ->
-            val url = server.start()
+            val base = server.start()
             val f = assertFailsWith<LiveClient.Failure> {
-                withTimeout(5.seconds) { LiveClient.open(url, "ak_wrong", LiveHello(), emptyList(), http) }
+                withTimeout(5.seconds) { LiveClient.open(base, "ak_wrong", LiveHello(), emptyList(), http) }
             }
             assertEquals(LiveClient.Failure.Handshake(401), f)
             assertEquals(emptyList(), server.texts)
@@ -98,9 +98,9 @@ class LiveClientTests {
     @Test
     fun testEngineBusyIsReportedWithItsCloseCode() = runBlocking {
         FakeLiveServer(behaviour = FakeLiveServer.Behaviour.EngineBusy).use { server ->
-            val url = server.start()
+            val base = server.start()
             val f = assertFailsWith<LiveClient.Failure> {
-                withTimeout(5.seconds) { LiveClient.open(url, "ak_test", LiveHello(), emptyList(), http) }
+                withTimeout(5.seconds) { LiveClient.open(base, "ak_test", LiveHello(), emptyList(), http) }
             }
             assertEquals(
                 LiveClient.Failure.Refused(

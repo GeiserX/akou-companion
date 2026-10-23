@@ -18,8 +18,6 @@ import kotlin.concurrent.thread
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrl
 
 /**
  * A local stand-in for akou's `GET /v1/live`, the port of FakeLiveServer.swift: a raw
@@ -97,8 +95,8 @@ class FakeLiveServer(
     /** Pings received from clients (each one answered with a pong unless the session stalls). */
     val pings: Int get() = _pings.get()
 
-    /** Starts accepting and returns the live URL to give the client. */
-    fun start(): HttpUrl {
+    /** Starts accepting and returns the base URL to give the client; it answers `/v1/live`. */
+    fun start(): String {
         thread(isDaemon = true, name = "fake-live-accept") {
             while (!server.isClosed) {
                 val s = try {
@@ -110,7 +108,7 @@ class FakeLiveServer(
                 thread(isDaemon = true, name = "fake-live-conn") { Connection(s).run() }
             }
         }
-        return "http://127.0.0.1:${server.localPort}/v1/live".toHttpUrl()
+        return "http://127.0.0.1:${server.localPort}"
     }
 
     override fun close() {
@@ -385,7 +383,7 @@ class PlainHttpRefusal(val status: Int, val code: String) : AutoCloseable {
     private val _requests = AtomicInteger()
     val requests: Int get() = _requests.get()
 
-    fun start(): HttpUrl {
+    fun start(): String {
         thread(isDaemon = true, name = "plain-http-refusal") {
             while (!server.isClosed) {
                 val s = try {
@@ -402,7 +400,7 @@ class PlainHttpRefusal(val status: Int, val code: String) : AutoCloseable {
                 }
             }
         }
-        return "http://127.0.0.1:${server.localPort}/v1/live".toHttpUrl()
+        return "http://127.0.0.1:${server.localPort}"
     }
 
     override fun close() = server.close()
