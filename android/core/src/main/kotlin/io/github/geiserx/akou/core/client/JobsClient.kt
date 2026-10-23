@@ -46,7 +46,20 @@ class JobsClient(
         val workspace: String? = null,
         /** Always true from the app: the phone deletes its copy only when the server keeps one. */
         val keepAudio: Boolean = true,
+        /**
+         * The file name and content type of the upload's file part, for audio shared from another
+         * app (`<id>.m4a`, `audio/mp4`). Null for the app's own recordings, which go up as
+         * `<id>.opus`, `audio/ogg`; an item queued before these existed decodes with null.
+         */
+        val audioFileName: String? = null,
+        val audioContentType: String? = null,
     ) {
+        /** The file part's name: `<id>.opus` unless the audio came with its own. */
+        val uploadFileName: String get() = audioFileName ?: "$recordingId.opus"
+
+        /** The file part's content type: `audio/ogg` unless the audio came with its own. */
+        val uploadContentType: String get() = audioContentType ?: "audio/ogg"
+
         val metadata: CompanionMetadata get() = CompanionMetadata(recordingId = recordingId, workspace = workspace)
     }
 
@@ -74,7 +87,7 @@ class JobsClient(
             add("keep_audio" to if (s.keepAudio) "true" else "false")
             add("metadata" to AkouJson.encodeToString(CompanionMetadata.serializer(), s.metadata))
         }
-        val body = Multipart(fields, Multipart.FilePart("file", "${s.recordingId}.opus", "audio/ogg", audio))
+        val body = Multipart(fields, Multipart.FilePart("file", s.uploadFileName, s.uploadContentType, audio))
         return Request.Builder().url(Endpoint.api(baseUrl, "/v1/jobs"))
             .post(body)
             .header(AkouHttp.AUTHORIZATION, AkouHttp.bearer(key))

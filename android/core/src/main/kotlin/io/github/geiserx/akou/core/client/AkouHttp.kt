@@ -23,6 +23,9 @@ import kotlin.coroutines.resumeWithException
  *
  * Each request carries its own read timeout as a [ReadTimeout] tag, applied by [RouteTimeouts].
  * OkHttp's default of 10 s is shorter than a job long poll.
+ *
+ * OkHttp's own resend on a failed connection is off, as URLSession has none: an upload whose
+ * connection drops is one attempt, and the upload queue's attempts and backoff count it as one.
  */
 object AkouHttp {
     /** The header the key travels in, as `Bearer <key>`. Never in a URL. */
@@ -40,6 +43,7 @@ object AkouHttp {
     fun make(builder: OkHttpClient.Builder = OkHttpClient.Builder()): OkHttpClient =
         builder
             .cache(null)
+            .retryOnConnectionFailure(false)
             .followRedirects(false)
             .followSslRedirects(false)
             .addInterceptor(RouteTimeouts)

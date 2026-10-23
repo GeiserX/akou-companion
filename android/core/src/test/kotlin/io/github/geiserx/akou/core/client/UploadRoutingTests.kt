@@ -87,8 +87,9 @@ class UploadRoutingTests {
     }
 
     /**
-     * A queue file whose items name no server. They go to "Record to", which is written into
-     * them, so moving "Record to" later never moves them.
+     * A queue file whose items name no server (the Kotlin shape with `serverId` absent; Android has
+     * no file from before several servers). They go to "Record to", which is written into them, so
+     * moving "Record to" later never moves them.
      */
     @Test
     fun testAnOldRecordingGoesToRecordToAndStaysWithIt() {
@@ -113,8 +114,10 @@ class UploadRoutingTests {
     }
 
     /**
-     * An old item already uploaded, waiting for its read-back: the first pass writes "Record to"
-     * into it, so a change of "Record to" before the read-back still reads it back where the job is.
+     * An item that names no server, already uploaded and waiting for its read-back. Android has no
+     * queue file from before several servers, so this is the Kotlin shape with `serverId` absent.
+     * The first pass writes "Record to" into it, so a change of "Record to" before the read-back
+     * still reads it back where the job is.
      */
     @Test
     fun testAnOldItemAwaitingItsReadBackKeepsItsServerWhenRecordToMoves() {

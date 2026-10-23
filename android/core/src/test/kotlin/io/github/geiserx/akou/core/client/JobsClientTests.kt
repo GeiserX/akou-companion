@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.geiserx.akou.core.client
 
+import io.github.geiserx.akou.core.protocol.AkouJson
 import io.github.geiserx.akou.core.protocol.CompanionMetadata
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -72,6 +73,54 @@ class JobsClientTests {
         assertTrue(req.headers.getValue("content-type").startsWith("multipart/form-data; boundary=akou-"))
         assertNotNull(req.headers["content-length"])
         assertNull(req.headers["transfer-encoding"], "a known length, never chunked")
+    }
+
+    @Test
+    fun testAudioSharedFromAnotherAppGoesUpWithItsOwnNameAndType() = runBlocking<Unit> {
+        val memo = File(dir, "memo.m4a").also { it.writeText("ftypM4A fake") }
+        val s = JobsClient.Submission(
+            recordingId = "rec-3", title = "New Recording 3", audioFileName = "rec-3.m4a", audioContentType = "audio/mp4",
+        )
+        client().submit(s, memo)
+
+        val req = fake.seen.first()
+        assertEquals("rec-3", req.headers["idempotency-key"])
+        assertEquals("rec-3.m4a", req.fileName)
+        assertEquals("audio/mp4", req.fileContentType)
+        assertEquals("New Recording 3", req.fields["title"])
+        assertContentEquals("ftypM4A fake".encodeToByteArray(), req.fileBytes)
+    }
+
+    /** A queue item written before the shared-audio fields existed still goes up as the app's own Ogg Opus. */
+    @Test
+    fun testASubmissionQueuedBeforeSharedAudioDecodesWithTheOpusDefaults() = runBlocking<Unit> {
+        val old = """{"recordingId":"rec-4","keepAudio":true,"title":"t"}"""
+        val s = AkouJson.decodeFromString(JobsClient.Submission.serializer(), old)
+        assertNull(s.audioFileName)
+        assertNull(s.audioContentType)
+        assertEquals("rec-4.opus", s.uploadFileName)
+        assertEquals("audio/ogg", s.uploadContentType)
+        // Not in the Swift test: the defaults reach the wire, and a nil field is not written back.
+        client().submit(s, audio())
+        assertEquals("rec-4.opus", fake.seen.last().fileName)
+        assertEquals("audio/ogg", fake.seen.last().fileContentType)
+        assertFalse("audioFileName" in AkouJson.encodeToString(JobsClient.Submission.serializer(), s))
+    }
+
+    /**
+     * Not in the Swift test, where URLSession never resends: a POST whose connection drops after the
+     * body went out reaches the server once per submit. OkHttp's retryOnConnectionFailure would
+     * resend it on a reused connection; the queue's attempts and backoff count each submit as one.
+     */
+    @Test
+    fun testADroppedUploadIsSentOncePerSubmit() = runBlocking<Unit> {
+        val c = client()
+        // Warm a pooled connection first, so the drop lands on a reused one.
+        runCatching { c.job("nope") }
+        fake.script(FakeAkouHttp.Script.Drop)
+        assertFailsWith<java.io.IOException> { c.submit(JobsClient.Submission(recordingId = "rec-drop"), audio()) }
+        assertEquals(1, fake.seen.count { it.method == "POST" }, "the dropped POST was sent once")
+        assertFalse(AkouHttp.shared.retryOnConnectionFailure, "OkHttp's own resend is off")
     }
 
     @Test

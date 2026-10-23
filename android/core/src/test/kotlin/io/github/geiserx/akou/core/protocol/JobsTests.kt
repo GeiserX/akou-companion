@@ -51,6 +51,16 @@ class JobsTests {
         assertFailsWith<IllegalArgumentException> { decode<Job>("""{"id":"j"}""") }
     }
 
+    /**
+     * As Swift, whose `companion` has no default on decode: metadata without `companion` is another
+     * client's, even with a `recording_id`. The constructor still fills in 1 for what the phone sends.
+     */
+    @Test
+    fun testMetadataWithoutCompanionIsNotOurs() {
+        assertNull(decode<Job>("""{"id":"j","status":"done","metadata":{"recording_id":"rec-1","workspace":"Work"}}""").metadata)
+        assertEquals(1, CompanionMetadata("rec-1", null).companion)
+    }
+
     /** What the phone sends as `metadata`: `companion` is always 1 and a missing workspace is left out, as on iOS. */
     @Test
     fun testCompanionMetadataOnTheWire() {

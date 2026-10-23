@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 package io.github.geiserx.akou.core.protocol
 
+import kotlinx.serialization.Required
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -42,8 +43,11 @@ data class CompanionMetadata(
     /** The recording's id, the same value as the upload's `Idempotency-Key`. */
     @SerialName("recording_id") val recordingId: String,
     val workspace: String?,
-    /** Always 1: marks a job the companion sent. */
-    val companion: Int = 1,
+    /**
+     * Always 1: marks a job the companion sent. Required on decode, as in Swift: metadata without it
+     * is another client's.
+     */
+    @Required val companion: Int = 1,
 )
 
 /** `GET /v1/jobs/{id}/result?format=json`. */
