@@ -37,3 +37,33 @@ The steps to get akou-companion from this repository onto your own iPhone throug
 - In akou's settings enter your server's URL and an `ak_` key from the server's Keys page or `akou keys create`, then press Test.
 - To record from the Action button (from M2): Settings, Action Button, Controls, then pick akou's record control.
 - External testers (people outside your team) need a beta review of the first build added to their group. App Store Connect also asks for a privacy policy URL before external testing or an App Store release.
+
+## Device check: recording from a locked phone
+
+This answers the M2 question in [DESIGN.md](DESIGN.md#starting-cold-from-a-locked-phone): can a recording start on a locked phone, with akou not running, without the app coming forward? Only a real phone can prove it; the Simulator has no Action button and no lock.
+
+Before you start:
+
+- A TestFlight build is installed, a server and key are set and Test passes.
+- You have made one recording from the app, so the microphone permission is granted.
+- Live Activities are on for akou (Settings, akou, Live Activities).
+- The record control is on the Action button (Settings, Action Button, Controls) and in Control Center, and the phone has been unlocked at least once since it booted.
+
+For each entry point (the Action button, the Control Center control on the Lock Screen, and "Start recording in akou" through Siri or the Shortcuts action):
+
+1. Unlock, swipe akou away in the app switcher so its process is gone, then lock the phone and wait 30 seconds.
+2. Without unlocking, trigger the entry point. Speak for about 20 seconds.
+3. Trigger it again (or "Stop recording in akou") to stop, still without unlocking.
+4. Unlock and open akou.
+
+It passes when all of these hold:
+
+- No Face ID or passcode prompt appeared before recording started, and akou did not come to the screen.
+- The recording indicator showed and akou's Live Activity appeared on the Lock Screen with the elapsed time running (and the last line, if the server has live text).
+- After the stop, the Live Activity went away, and the recording is in the Library with about 20 seconds of your voice that plays back.
+
+It fails if the phone asked to unlock first, if akou opened, if no Live Activity appeared, if a message said "Recording starts in the akou app" (the press ran in the widget extension) or "akou cannot record right now", or if the recording is missing, silent or shorter than you spoke.
+
+Run it once more with Live Activities turned off for akou, and note what happens; Apple says the recording stops without one.
+
+Write the result under "Device result" in DESIGN.md's M2 section: the date, the phone model, the iOS version, the build number, and pass or fail for each entry point with what you saw on a fail.
