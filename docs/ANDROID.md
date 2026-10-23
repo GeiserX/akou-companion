@@ -1,6 +1,6 @@
 # akou-companion for Android
 
-The plan for the Android version of akou-companion. The iOS app is the reference. It records Ogg Opus on the phone, streams each page to akou's `GET /v1/live` socket for live text, uploads the file for the final pass, and browses the server's history. The Android app does the same, against the same server, with the same wire bytes.
+The plan for the Android version of akou-companion. The iOS app is the reference. It records Ogg Opus on the phone, streams each page to akou's `GET /v1/live` socket for live text, uploads the file for the final pass, and browses the server's history. The Android app does the same, against the same server and protocol. Its Ogg framing matches iOS byte for byte, and the bytes it writes to the file are the bytes it sends on the socket.
 
 Nothing below is built yet. Every claim about the iOS code points at the file and line it comes from on `main` at `0a08451`. Server behaviour is from [GeiserX/akou](https://github.com/GeiserX/akou) at `fed2cafc` (release 1.2.2); `live.ts` means `src/main/server/live.ts` there and `ogg.ts` means `src/main/server/ogg.ts`. The wire protocol is [PROTOCOL.md](PROTOCOL.md) and the iOS design is [DESIGN.md](DESIGN.md).
 
@@ -145,7 +145,7 @@ QR pairing (iOS M4, [M4.md](M4.md)) is not planned until the iOS side decides wh
 
 ## 5. Android-specific traps and how each is handled
 
-**Runtime permissions.** `RECORD_AUDIO` must be granted before capture starts, the counterpart of the iOS permission await (RecordingController.swift:78). `POST_NOTIFICATIONS` is a runtime permission on API 33+. Without it the service still records, but the notification with Pause/Resume/Stop and the chronometer never appears, so the user has no sign a recording runs and A2's controls vanish. The Record screen asks for both before the first recording and explains a refusal.
+**Runtime permissions.** `RECORD_AUDIO` must be granted before capture starts, the counterpart of the iOS permission await (RecordingController.swift:78). `POST_NOTIFICATIONS` is a runtime permission on API 33+. Without it the service still records and still shows in the system's list of running apps, but its notification, with Pause/Resume/Stop and the chronometer, is left out of the notification drawer, so A2's controls vanish. The Record screen asks for both before the first recording and explains a refusal.
 
 **Foreground service type and the Play declaration.** Recording runs in a foreground service with `foregroundServiceType="microphone"`, permission `FOREGROUND_SERVICE_MICROPHONE`, started with `FOREGROUND_SERVICE_TYPE_MICROPHONE`. Play Console asks for a justification and a demo video per type. We budget one recorded demo, the same way the iOS App Review notes were prepared. Uploads use WorkManager, not a dataSync FGS, and the microphone service stops right after the recording, so only one type needs a declaration.
 
@@ -159,9 +159,9 @@ QR pairing (iOS M4, [M4.md](M4.md)) is not planned until the iOS side decides wh
 
 **OEM battery killers.** Xiaomi, Huawei and some Samsung modes kill foreground services and defer work. We cannot fix that in code. The queue makes it visible, the server's Idempotency-Key makes retries safe, and Settings links the [dontkillmyapp.com](https://dontkillmyapp.com) guidance for the detected vendor.
 
-**16 KB page alignment.** Play requires 16 KB aligned native libraries for apps that target API 35 and later, so it applies at targetSdk 36. `:opus` builds with NDK r28 or newer. CI checks the `.so` alignment.
+**16 KB page alignment.** Play requires 16 KB aligned native libraries for apps that target API 35 and later, so it applies at targetSdk 36. `:opus` builds with NDK r28 or newer. CI checks the alignment of the built APK and AAB, not only the `.so` files, with `zipalign -c -P 16 -v 4` on the release build; a test build with a 4 KB aligned library proves the check goes red.
 
-**Cleartext and the local network.** Network security config cannot express CIDR ranges, the same way ATS could not (DESIGN.md:82). The base config permits cleartext and `Endpoint` stays the only gate, with the source-scan test. Android 17 (targetSdk 37, our next bump) adds the `ACCESS_LOCAL_NETWORK` runtime permission. Without it, TCP to a LAN akou times out with no clear error. Whether 100.64/10 over Tailscale counts as local is undocumented. We test it before raising targetSdk to 37, and the Test button explains the failure.
+**Cleartext and the local network.** Network security config cannot express CIDR ranges, the same way ATS could not (DESIGN.md:82). The base config permits cleartext and `Endpoint` stays the only gate, with the source-scan test. Android 17 (targetSdk 37, our next bump) adds the `ACCESS_LOCAL_NETWORK` runtime permission. Without it, TCP to a LAN akou times out with no clear error. Whether 100.64/10 over Tailscale counts as local is undocumented. Before raising targetSdk to 37 we declare the permission, ask for it the first time a server with a private address is saved or tested, and on a refusal show that the phone blocks local connections and how to allow them. Tests cover the granted and the denied path, on a LAN address and on a 100.64/10 address.
 
 **The Ogg CRC is not zlib's.** `java.util.zip.CRC32` is reflected with a final XOR. The server refuses every page with bad_page (ogg.ts:85). The hand-written table from OggCRC.swift:6-19 is pinned by the 0x89A1897F check value.
 
@@ -205,7 +205,7 @@ The main ruleset requires only `ci-ok` today (ci.yml:65-73). A job in `android.y
 
 GitHub releases ship the APK alongside. The two builds have different signers (Play's app signing key and ours), so a user picks one source. An install from one does not update from the other.
 
-Google's developer verification is in force. Since 30 September 2026, certified devices in Brazil, Indonesia, Singapore and Thailand refuse a normal install of an APK whose signer is not registered to a verified developer, from any source. The global rollout follows in 2027. Before the first `android-v*` tag, we register our release signing certificate in the same developer account, so the GitHub APK installs everywhere. This is on the release checklist.
+Google's developer verification is in force. Since 30 September 2026, in Brazil, Indonesia, Singapore and Thailand, certified devices check installs from Google Play and the large OEM stores against registered developers. Sideloading still works there, with a different flow, and ADB is unchanged. In 2027 the check reaches every app on certified devices, whatever the source. Before the first `android-v*` tag, we register our release signing certificate in the same developer account, so the GitHub APK installs everywhere. This is on the release checklist.
 
 Play asks for the microphone FGS declaration (above) and the Data safety form. In the form, recordings go only to the user's own server, and the answer to "is all data encrypted in transit" is no: Endpoint allows plain http to a private address (Endpoint.swift:48-60).
 
