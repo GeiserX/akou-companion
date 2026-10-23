@@ -1,0 +1,237 @@
+# akou-companion for Android
+
+The plan for the Android version of akou-companion. The iOS app is the reference. It records Ogg Opus on the phone, streams each page to akou's `GET /v1/live` socket for live text, uploads the file for the final pass, and browses the server's history. The Android app does the same, against the same server, with the same wire bytes.
+
+Nothing below is built yet. Every claim about the iOS code points at the file and line it comes from on `main` at `0a08451`. Server behaviour is from [GeiserX/akou](https://github.com/GeiserX/akou) at `fed2cafc` (release 1.2.2); `live.ts` means `src/main/server/live.ts` there and `ogg.ts` means `src/main/server/ogg.ts`. The wire protocol is [PROTOCOL.md](PROTOCOL.md) and the iOS design is [DESIGN.md](DESIGN.md).
+
+## 1. Architecture
+
+**Native Android: Kotlin, Jetpack Compose, a pure JVM core, and libopus through the NDK.** No Kotlin Multiplatform, no Flutter, no shared UI.
+
+Why:
+
+- The hard parts of this app are platform code that no framework shares. That means the microphone foreground service and its start rules, `AudioRecord` and the silenced-capture callback, the ongoing notification, the Quick Settings tile, WorkManager, the Keystore, and ExoPlayer with an auth header. Sharing the pure parts through KMP would mean rewriting the tested Swift (`LiveSession` is an actor, LiveSession.swift:1-363) and calling Kotlin from Swift through a bridge that is still alpha. The iOS app ships to TestFlight ([TESTFLIGHT.md](TESTFLIGHT.md), and commit `6fc022a` raised the build number so TestFlight could carry the multi-server app). We will not destabilise it to save a few thousand lines.
+- The protocol is small and changes rarely. The cheap way to keep two codebases in step is to treat `docs/PROTOCOL.md`, the Swift tests and their two fixtures as the spec, and port the tests, not the code.
+- libopus over the NDK, not MediaCodec. The iOS encoder is libopus with six exact settings: bitrate 24000, VBR on, max bandwidth WIDEBAND, signal VOICE, DTX off, FEC off (akou_opus_shim.c:8-13), created as 16 kHz mono VOIP (OpusEncoder.swift:28). Its pre-skip of 312 is what the ffmpeg fixture carries and what the byte-identical OpusHead test hard-codes (OggTests.swift:22). MediaCodec's Opus encoder gives no access to those six settings, so the pre-skip cannot be pinned either. `MediaMuxer` and `MediaRecorder` write a whole file with no per-page callback, and the page bytes must be the same in the file and on the socket (DESIGN.md:69).
+
+What we do not require: byte-identical Opus packets between iOS and Android. The Ogg framing is identical by construction once the port passes the fixture tests. Packet identity depends on the libopus commit, the float build and the SIMD paths, and the server does not need it. If we want it later, it is one golden test on both sides (fixed PCM, fixed serial, compare SHA-256). This is open decision 3 in section 8.
+
+## 2. Module layout
+
+Inside this repo, under `android/` (decided, see section 8).
+
+```
+android/
+  settings.gradle.kts, build.gradle.kts, gradle/libs.versions.toml
+  core/      Kotlin/JVM library. No Android dependency. Tests run on a plain JVM.
+             ogg/       OggCRC, OggPage, OpusHeaders, OggOpusWriter, FrameChunker
+             protocol/  LiveMessages, Jobs, History, ServerInfo (kotlinx.serialization)
+             client/    Endpoint, AkouHttp (OkHttp), LiveClient, LiveSession, LiveTranscript,
+                        ServerProbe, JobsClient, HistoryClient, UploadQueue, ServerBook,
+                        RecordIntentGate, TranscriptDigest, DemoServer (interceptor), DemoLiveText
+  opus/      Android library. CMake build of libopus + one JNI file mirroring akou_opus_shim.c.
+             Tests are instrumented (they need the .so): encoder settings, pre-skip 312.
+  app/       Compose app. RecordingService (FGS), AudioCapture, RecordingFile, notification,
+             KeyStore, WorkManager uploader, ExoPlayer, TileService, Glance widget, screens.
+  wear/      Later, A6 only, if Wear OS comes into scope.
+```
+
+SDK levels: `minSdk 31` (Android 12, decided), `targetSdk 36` and `compileSdk 36`. Google Play takes new apps and updates only when they target API 36. The next bump, targetSdk 37, brings the local-network permission (section 5).
+
+`core` depends on OkHttp and kotlinx.serialization only. An `OpusEncoder` interface lives in `core`, and `opus` implements it over JNI. The JVM tests use a fake encoder that replays the fixture's audio packets in order and reports a lookahead of 104, so pre-skip 312. ffprobe reads duration from the granules, so the ffprobe parity test still holds with the fake. It proves the Ogg framing and the granules, not the encoder. The Swift writer tests use a real libopus encoder (OggTests.swift:91, :133, :144, :157); on Android the encoder checks (bitrate 24000, lookahead > 0, 1 s is 1500 to 6000 bytes, pre-skip 312) live in `:opus`'s instrumented suite. They run in the emulator job and on the device in A1. Until the emulator job is a required check, the required check does not run libopus.
+
+The split mirrors `Package.swift`: AkouOpus, AkouProtocol and AkouClient need no phone; `App/` does.
+
+## 3. Component map
+
+Each row names the iOS piece, its Android counterpart, the invariants that must survive, and the iOS test file that becomes the Kotlin test spec. The Kotlin tests read the fixtures `Tests/AkouKitTests/Fixtures/ffmpeg-1s-16k.opus` and `server-0.6.2.json` in place. They are not copied. The demo samples in `App/Sources/Demo/Samples/` are read in place the same way, as an extra asset directory of `:app`, and their attribution stays in [NOTICE](../NOTICE).
+
+### 3.1 Audio and wire format (AkouOpus)
+
+| iOS | Android | Invariants | Test spec |
+|---|---|---|---|
+| `OpusEncoder` + `COpusShim` (OpusEncoder.swift:1-65, akou_opus_shim.c:1-27) | `:opus`, libopus via CMake/NDK, JNI functions create/configure/lookahead/bitrate/encodeFloat/destroy | 16000 Hz, 1 channel, VOIP (OpusEncoder.swift:28); the six ctl settings in order, stop at first error (akou_opus_shim.c:8-13); exactly 320 Float32 samples per frame, 1500-byte out buffer (OpusEncoder.swift:54-64); preSkip48k = lookahead*3 (OpusEncoder.swift:51); preSkip must be 312 | Instrumented, in `:opus`: OggTests.swift:102-108 (bitrate 24000, lookahead > 0, 319 samples throws), :110-130 (1 s is 1500 to 6000 bytes). Add preSkip == 312, which iOS does not pin |
+| `OggCRC` (OggCRC.swift:6-19) | Hand-written Kotlin, `UInt`/`ushr` | Poly 0x04C11DB7, init 0, not reflected, no final XOR. Not `java.util.zip.CRC32` | OggTests.swift:14-18 ("123456789" gives 0x89A1897F, empty gives 0), :43-53 |
+| `OggPage` (OggPage.swift:1-153) | Kotlin with `ByteBuffer.order(LITTLE_ENDIAN)` | 27-byte header, lacing 255-run then remainder (OggPage.swift:50-61), > 255 segments throws (:66), CRC patched at offset 22, reader refuses continued pages and 255-terminal lacing (:93, :104). Writer never sets continued | OggTests.swift:20-26 (head page equals ffmpeg's first 47 bytes), :28-41 (every fixture page re-encodes byte-exact, page 2 granule 9600), :55-78 |
+| `OpusHeaders` (OpusHeaders.swift:1-33) | Kotlin | RFC 7845 layout, 19-byte head, vendor `akou-companion` (OggOpusWriter.swift:34), zero comments. Server refuses channels != 1 (live.ts:295-296) and a second page that is not OpusTags (live.ts:252-254) | OggTests.swift:20-26 |
+| `OggOpusWriter` (OggOpusWriter.swift:1-105) | Kotlin class, same state machine | Header pages built once and cached (:46-47); page every 10 packets (:61-68); audio page granule = packets*960 with no pre-skip (:94); EOS granule = preSkip + inputPackets*960 after one silence frame (:75-88); sequence +1 per page; append before headers throws, append after finish throws; no page over 64 KB (PROTOCOL.md:37; 10 packets of at most 1500 bytes stay far under it) | OggTests.swift:110-149 and :153-166 (ffprobe parity, see the trap on skipping) with the fake encoder; add a one-line test that no written page exceeds 64 KB |
+| `FrameChunker` (FrameChunker.swift:1-47) | Kotlin | Exact 320-sample frames in order, no sample lost; flush pads with zeros once (:38-43). The padded last frame counts as input (RecordingFile.swift:65), so the final granule over-reports by up to 19.9 ms. We keep that, so the two apps make the same file for the same input | FrameChunkerTests.swift:10-57 |
+
+### 3.2 Protocol models (AkouProtocol)
+
+| iOS | Android | Invariants | Test spec |
+|---|---|---|---|
+| `LiveMessages` (LiveMessages.swift:1-199) | kotlinx.serialization sealed classes, `ignoreUnknownKeys`, `encodeDefaults = true`, `@SerialName("hello")`/`("stop")`, no class discriminator beyond `type` | The hello carries exactly the keys `type`, `v`, `codec`, `language`, `model`, with `type` "hello" and `v` 1. The server refuses an unknown field and v != 1 (live.ts:348, :423-428). Key order does not matter to the server: the iOS string is sorted because Swift uses `.sortedKeys` (LiveMessages.swift:188-190), and kotlinx.serialization has no such option. An unknown server type decodes to Unknown, never fails (:154-164); close codes 4400/4401/4409/4500/4503 (:110-124) | ProtocolTests.swift:11-88, with the exact-string test replaced by: parse the output, assert the key set and values, and assert a hello built from defaults still carries `v`, `codec`, `language` and `model` |
+| `Jobs` (Jobs.swift:1-133) | Same | `keep_audio` missing means false (Jobs.swift:17-19, 44); foreign metadata decodes to null, never fails (:45-46); status stays a string; ignore unknown keys | JobsClientTests.swift:75-91 |
+| `History` (History.swift:1-259) | Same, with the same two leniency levels | `CallLine` and `CallNote` never fail, with fallbacks for id, part, speaker, time (:137-150, :193-199); `CallSummary`, `CallDetail`, `Dictation` are strict except `final`, `words`, `error`; seek = a0, else (w0 - wallStart)/1000, clamped at 0 (:157-161); `isLive` rule (:39); `canUpload`/`seesHistory` (:254-259) | HistoryClientTests.swift:166-305 |
+| `ServerInfo`, `KeyInfo` (ServerInfo.swift:1-47) | Same | Read only name, version, mode, capabilities, live.engines, retain_days; live text only when `capabilities.live == true`; engine ids from `live.engines`, never a table on the phone | ServerInfoTests.swift:8-27 with `server-0.6.2.json` |
+
+### 3.3 Network client (AkouClient)
+
+| iOS | Android | Invariants | Test spec |
+|---|---|---|---|
+| `Endpoint` (Endpoint.swift:1-73) | Kotlin port, literal-only IP parser (never `InetAddress.getByName`, which resolves names) | https always; http only to IPv4 127/8, 10/8, 172.16/12, 192.168/16, 100.64/10, IPv6 ::1 and fc00::/7 (Endpoint.swift:48-60); any host name over http refused, `localhost` included (:4-7); base path prefix kept; live URL is wss/ws on `/v1/live` | EndpointTests.swift:7-25; TransportPolicyTests.swift:24-37 becomes a source scan over `core/client` that every `Request.Builder().url(` has `Endpoint.` within 5 lines, with a count >= 3 positive control |
+| `AkouSession` (Sessions.swift:1-52) | One shared `OkHttpClient`: no `Cache`, `followRedirects(false)`, `followSslRedirects(false)`, an interceptor that follows a 3xx only on the same scheme, the same host (case-insensitive) and the same effective port | Cross-origin 3xx is returned as the answer (Sessions.swift:24-31); per-call timeouts are in the JobsClient, HistoryClient and ServerProbe rows | RedirectTests.swift:47-77 |
+| `LiveClient` (LiveClient.swift:1-168) | OkHttp `WebSocket` on a client built with `pingInterval(20 s)`: `Authorization: Bearer` on the upgrade, `send(String)` for hello and stop, `send(ByteString)` per page, listener mapped to a Flow | hello, wait for ready, then the two header pages, then audio (:49-82); one binary frame is exactly one page (the server checks frame length against the segment table, ogg.ts:80-84); handshake and refusal mapping (:54-73, :154-157). iOS pings every 20 s and ignores the result (:134-140). OkHttp's public `WebSocket` has no ping method, and a text heartbeat would be refused as `bad_message` (live.ts:423-428), so we use OkHttp's `pingInterval` and accept its rule: no pong within 20 s fails the socket. LiveSession maps that to `network` and reopens with backoff (LiveSession.swift:64, :269-280), and the server pings a quiet socket too (PROTOCOL.md:65) | LiveClientTests.swift:9-75 against a port of FakeLiveServer.swift (see below) |
+| `LiveSession` (LiveSession.swift:1-363) | Kotlin class confined to one single-thread dispatcher, same state machine, same generation counter | maxQueuedPages 25, backoff 1/2/4/8/30 s, stopTimeout 10 s (:49-60); while connecting drop the oldest past the cap, while live a full queue drops the session with reason `behind` and never flushes (:137-149); gap = end of last page actually sent to start of first page of the new session (:239-242); header pages resent on every reopen; retryable reasons too_fast, stream_lost, behind, network (:64); attempt resets only after a 30 s healthy session (:66, :264); stop() always ends the events stream; `LiveText` interface kept for the demo (:355-363). Port rule for the send side, because OkHttp's `send()` never waits and has no per-message completion: keep LiveSession's own page queue, and hand the head page to `webSocket.send` only when `queueSize() == 0`. Check that when each page arrives (every 200 ms) and on a short timer. The head page stays counted until `queueSize()` is back to 0, then leaves the queue. A page arriving with 25 queued is `behind`, exactly as :141-145. A false from `send()` means OkHttp already tore the socket down, so it is `network` | LiveSessionTests.swift:21-245 (queue high-water exactly 25 at :74-99) |
+| `LiveTranscript` (LiveTranscript.swift:1-95) | Kotlin | A token whose first character is whitespace starts a word (:47); a line closes at the next word after sentence punctuation (:61) or >= 1.5 s silence (:30); gap label and clock format (:79-91). It counts nothing, so the port checks the first and last code point only | LiveTranscriptTests.swift:12-65 |
+| `ServerProbe` (ServerProbe.swift:1-58) | Same, with `readTimeout(15 s)` | name must be `akou` else notAkou; 401 is the key; 15 s timeout (Sessions.swift:20-22) | ServerProbeTests.swift:36-58 |
+| `ServerBook`, `SecretStore` (ServerBook.swift:1-183) | ServerBook as JSON in Preferences DataStore; SecretStore backed by an AES-GCM key in AndroidKeyStore, one entry per server UUID, excluded from backup. `ServerMigration` (:122-183) is not ported: no Android install predates the book | Key never in the book; canUpload/seesHistory; Record to follows adds and removes (:81-95) | ServerBookTests.swift:132, :150 (migration tests dropped) |
+| `JobsClient`, `Multipart` (JobsClient.swift:1-212, Multipart.swift:1-62) | OkHttp `MultipartBody` with `file.asRequestBody()`; no body file needed | Field set, filename `<id>.opus`, `audio/ogg`, `Idempotency-Key` = recording id (JobsClient.swift:79-83); `wait` clamped 0..60 with timeout wait+30 s (:110-114); timeouts: OkHttp's default read timeout is 10 s, so `jobRequest` gets a per-call `newBuilder().readTimeout(wait + 30 s)` and the other job routes 60 s, the iOS system default. The detail screen long-polls with `wait: 30` (RecordingDetailView.swift:121); without this every such poll would read as unreachable. DELETE carries `Content-Type: application/json` or akou answers 415 (:141-145); Retry-After in seconds from the header, else `retry_after_s` from the JSON error body (JobsClient.swift:193, UploadQueue.swift:368-372); paths built with `HttpUrl.Builder.addPathSegment` on every route, which is stricter than iOS (:112, :119, :134, :144 join raw ids) | JobsClientTests.swift:24-117; MultipartTests.swift:7; add a MockWebServer test that delays the body 12 s and proves a `wait=30` poll survives, and one that a 429 with only `retry_after_s` in the body sets the wait |
+| `UploadQueue` (UploadQueue.swift:1-461) | Same state machine, JSON file written atomically (`AtomicFile`) in `filesDir`; transport is WorkManager (section 3.4) | Keyed by recording id; file name not path (:23-25); 5 s doubling to 15 min, Retry-After overrides (:88-90, :360-365); retryable 408, 429, >= 500, < 400 (:356-358); delete the local file only after read-back shows the same job id with keep_audio true and the keep-copy setting off (:292-306); 404/410 at read-back parks and keeps the file (:311-317); requeue interrupted uploads not carried by live work (:327-335); server_removed never rerouted on a guess. The queue's `notBefore` is the earliest retry, not an exact time (section 5, Doze) | UploadQueueTests.swift:65-249 (waits exactly [5,10,20,40,80,160,320,640,900,900]); UploadRoutingTests.swift:58-186 |
+| `HistoryClient` (HistoryClient.swift:1-137) | Same, with `readTimeout(15 s)` | 401/403 is cannotSeeHistory, never retried in a loop (:126-127); ids sanitised to one segment (:101-106); key only in the header; 15 s timeout (Sessions.swift:20-22) | HistoryClientTests.swift:166-305 |
+| `AuthorizedAudioLoader` + `RangeFetch` (AuthorizedAudioLoader.swift:1-368) | Not ported. Media3 ExoPlayer with `OkHttpDataSource.Factory(sharedClient)` and a per-server `Authorization` property. ExoPlayer makes Range requests itself and plays Ogg Opus and WebM | Key never in a URL; 409 not_kept and 410 gone reach the UI as typed errors (from `InvalidResponseCodeException`); dictation audio answers 200 for the whole file, so confirm the data source skips to the seek position; the WebM refusal (:161-164) is iOS-only and is dropped | AuthorizedAudioLoaderTests.swift:146-332 shrinks to: key in header not URL, error mapping, same-origin redirect |
+| `RecordIntentGate` (RecordIntentGate.swift:1-48) | Kotlin, as is | start resumes when paused, starts when idle, nothing when recording; status reported on every exit (:31-47) | RecordIntentGateTests.swift:48-124 |
+| `TranscriptDigest` (TranscriptDigest.swift:1-91) | Kotlin, counting grapheme clusters: `java.text.BreakIterator.getCharacterInstance()` on the JVM, `android.icu.text.BreakIterator` on the device | 600-character opening in whole sentences, ellipsis on a cut word. Swift compares `count`, which is grapheme clusters (:38, :43, :51). Code points would split a ZWJ family, a flag or a skin-tone emoji where Swift does not | TranscriptDigestTests.swift:7-54, plus a case with a ZWJ emoji at the cut |
+| `DemoServer`, `DemoLiveText` (DemoServer.swift:1-301, DemoLiveText.swift:1-66) | An OkHttp application interceptor on the shared client answering host `demo.akou.invalid`; the same client feeds ExoPlayer so demo audio plays; `DemoLiveText` implements `LiveText` | Key exactly `Bearer ak_demo`; server body with live engines [demo] and scopes [jobs]; Range parsing; words at 0.5 + i*0.4 s driven by page end times | DemoServerTests.swift:32-100 |
+
+**The fake live server.** FakeLiveServer's `.stall(afterPages:)` stops reading the socket (FakeLiveServer.swift:22-23). That is what drives the queue-cap test. MockWebServer's WebSocket upgrade always reads incoming frames, so it cannot stall. The Kotlin fake is a small raw `ServerSocket` WebSocket server in `core`'s test sources (handshake plus frame parsing, about 100 lines). It has the same behaviours: normal, engineBusy, tooFast, keyRevoked, stall. It checks the bearer, the serial and the page sequence. MockWebServer is used only for the HTTP fakes (the FakeAkouHTTP port).
+
+### 3.4 Recording side (App/)
+
+| iOS | Android | Invariants | Test spec |
+|---|---|---|---|
+| `RecordingController` (RecordingController.swift:14-234) | `RecordingService`, a foreground service of type `microphone`, owning the state as a `StateFlow`; the UI binds to it | idle, recording(startedAt), paused, stopping (:17-23); `RECORD_AUDIO` is granted before capture starts, the counterpart of the permission await at :78, with the start guard checked before and after it (:77, :79); a failed capture start finishes and deletes the file (:85-91); only a system pause auto-resumes (:114-124); startedAt shifted by paused time (:156); stop order capture, file.finish, forwarder, live.stop, listener awaited not cancelled, transcript, activity, state, status, onFinished (:167-186); after onFinished the service enqueues the upload with WorkManager and calls `stopSelf()`, so the microphone service never stays up for network work; live only when `serverSupportsLive != false` (:191); a recording keeps the server it started for | SeamTests.swift:73-106 via a `SampleSource` fake like FileSampleSource.swift |
+| Service death (no iOS counterpart: iOS enqueues only on stop, RecordingController.swift:161-187) | `onDestroy` finishes the file and enqueues it. A start-up sweep handles the cases where no callback runs: it finds `.opus` files in `Recordings/` with no queue item and no live recording, drops a torn trailing page, sets the EOS flag on the last whole page (recomputing its CRC), and enqueues the file | Android 13+ shows a Stop button for every foreground service in the notification shade, and that Stop removes the whole app with no callback. OEMs kill services too. On Android this is a routine path, not an edge case | JVM test: a file cut mid-page is repaired to a valid Ogg stream that ffprobe reads |
+| `AudioCapture` (AudioCapture.swift:7-184) | `AudioRecord`, `ENCODING_PCM_FLOAT`, 16000 Hz, mono, `VOICE_RECOGNITION`, blocking reads on a dedicated thread into the chunker; 48 kHz plus resampler fallback when the builder refuses 16 kHz; `registerAudioRecordingCallback` and `isClientSilenced` map to onInterruption(began/ended); `AudioDeviceCallback` for route changes; `setCommunicationDevice` for a Bluetooth mic; `read()` returning `ERROR_DEAD_OBJECT` (audio server restart) rebuilds the `AudioRecord` and resumes, or pauses if the rebuild fails | Output 16 kHz mono Float32 off the main thread (:15-16, :30); a route change keeps the same file (:122-134); the audio server restart is the counterpart of `mediaServicesWereReset` (:135-150); a failed restart becomes a pause, never a lost recording | New: one instrumented test that drives the real `AudioRecord` path on the emulator. On CI the virtual microphone gives silence, so the test asserts that frames flow, pages are written and the file is a valid Ogg stream, never anything about the audio content |
+| `RecordingFile` (RecordingFile.swift:8-95) | `FileOutputStream` in `filesDir/Recordings` (credential-encrypted storage, readable after first unlock, same meaning as `completeUntilFirstUserAuthentication`, :28-35); one single-thread dispatcher; `Channel(UNLIMITED)` of (page, endsAt); `fsync` on finish | Same bytes in file and on socket; headers written at once; first write error stops encoding and is reported at finish | FrameChunkerTests.swift:44-57, OggTests.swift |
+| `ActivityController` + Live Activity (ActivityController.swift:9-77, AkouWidgets.swift:17-110) | The FGS notification: `setUsesChronometer(true)` + `setWhen(startedAt)` while recording, "Paused" while paused, last line in `BigTextStyle`, Pause/Resume and Stop actions, content intent to the Record screen, `setOnlyAlertOnce`. On Android 16+ ask for Live Update promotion with `NotificationCompat.Builder.requestPromotedOngoing(true)` as a bonus. It takes effect only with the `POST_PROMOTED_NOTIFICATIONS` manifest permission, an ongoing notification with a content title, and an allowed style (`BigTextStyle` is one). The user can turn it off, so the plain notification is the baseline | Lines pushed at most once per 5 s, state changes at once (:5-10, :36-47); elapsed time drawn by the system from startedAt; needs `POST_NOTIFICATIONS` (section 5) | None on iOS for the throttle; add a unit test on the throttle logic |
+| Record intents, `RecordControl`, Shortcuts (RecordIntents.swift:14-105, RecordControl.swift:8-27, AkouShortcuts.swift:6-38) | Notification actions (A2); Quick Settings `TileService` and static app shortcuts through a trampoline activity (A4); `RecordingStatus` becomes the service's StateFlow plus `requestListeningState` | Toggle shows only state the app wrote; flag cleared at process start and when the service is destroyed | RecordIntentGateTests.swift |
+| `DeepLink` (DeepLink.swift:7-38) | intent-filter for scheme `akou-companion`, handled by Navigation Compose | `record` opens Record; `recording/<id>` needs a non-empty id and opens Record to's Library | SeamTests.swift:109-121 |
+| `RecentSnapshot`, `SnapshotWriter`, widget (RecentSnapshot.swift:9-84, SnapshotWriter.swift:11-42) | Glance `GlanceAppWidget`, snapshot JSON in `filesDir`, `updateAll` after each write; no App Group needed, same process | 5 newest, 600-character openings, the widget holds no key and makes no request. Glance runs in the app's process, so the boundary is a rule, not a sandbox | A source scan like WidgetKeyBoundaryTests.swift:14: nothing in the widget package imports from `core/client` or the key store, and nothing there mentions `Authorization` |
+| `LastRecordingIntent` (LastRecordingIntent.swift:15-109) | Dropped for now. TranscriptDigest is ported; an on-device summary (ML Kit GenAI) is a later option | | |
+
+### 3.5 Library and settings (App/)
+
+| iOS | Android | Invariants | Test spec |
+|---|---|---|---|
+| `KeyStore` (KeyStore.swift:12-63) | AndroidKeyStore AES-GCM key, no user-auth requirement (background uploads must read it after first unlock, :9-11), ciphertext per server id in a file excluded by `dataExtractionRules` (with minSdk 31 that is the only backup config Android reads). Not `EncryptedSharedPreferences` (deprecated) | Empty save deletes; keys trimmed (:38-39); a failed save does not count as changed | SeamTests.swift:41; DemoModeTests.swift:31 |
+| `ServerSettings` (ServerSettings.swift:14-27) | Preferences DataStore | The settings a recording reads: `liveLanguage` and `liveModel` (picked from `live.engines`, `auto` when empty, :59-61), `workspaces` and `defaultWorkspace`, `keepLocalCopy`, `libraryServer`. The Record screen probes the Record to server and sets `serverSupportsLive` (RecordingController.swift:39), which decides whether live text opens at all (:191) | Port the reads with their `auto`/empty defaults |
+| `SettingsView`, `ServerEditorView` | Compose screens over DataStore | A changed URL or key clears the saved Test (ServerEditorView.swift:100-104); a failed Test clears it in the book (:153-159); the Test uses the trimmed key (:138-139); Record to change retries parked uploads | ServerEditorTests.swift:11 |
+| `ServerAccess` (HistoryStores.swift:9-68) | ViewModel | Scopes re-read from `/v1/keys/me` on every open and written back only when changed (:56-67) | HistoryClientTests.swift:166 |
+| `LibraryStore` (LibraryStore.swift:12-195) | ViewModel with paging | Metadata cannot be filtered server-side, so read up to 5 pages for 20 rows and on until one row; loadMore reads until a page adds a row (:30-34, :92-96); drop answers from a server no longer shown | None on iOS; add unit tests on the fill and loadMore rules |
+| `RecordingDetailView`, `WordFlow` | Compose `FlowRow`, tappable words, highlight s <= now < e | 409 not_done after `done` waits 2 s and retries (RecordingDetailView.swift:115-118); server duration wins over the player's estimate; delete never deletes the phone's copy | PlayerTests.swift:36; add Paragraph.split tests |
+| `CallDetailView`, `DictationDetailView`, `MarkdownBlock` | Compose, inline-only markdown, lazy list | Note markers collapsed to one bullet, `-1 dB` is not a marker | CallNotesTests.swift:8 |
+| `RecordingPlayer` | ExoPlayer in a `MediaSessionService` only if background playback is wanted | Phone copy first, else server audio; do not take audio focus while recording | PlayerTests.swift:10, :36 |
+
+Dark theme is the default for every screen.
+
+## 4. Milestones
+
+Each milestone ends with a check on a real phone or the emulator, against a real akou server the phone can reach. Nothing is done because the code is written.
+
+**A0. The core, on the JVM.** `android/core` with the Ogg layer, the protocol models, Endpoint, the OkHttp client rules, LiveClient, LiveSession, UploadQueue, ServerBook, LiveTranscript, TranscriptDigest, RecordIntentGate. The Swift tests in sections 3.1 to 3.3 ported as the spec, reading the two fixtures in place. `android.yml` on `ubuntu-latest`. The Gradle build already sets minSdk 31, targetSdk 36 and compileSdk 36.
+Done when: `./gradlew :core:test` is green on CI with ffmpeg installed so the ffprobe parity test cannot skip; the fixture re-encodes byte-exact; the CRC check value, the hello key set and the 25-page high-water pass; and three positive controls each make the job red once, then get reverted: a deliberately broken CRC table, a PR touching only `android/` that must run the job rather than pass on the path filter, and a build with the test sources excluded that the "Executed 0 tests" guard must fail.
+
+**A1. Record, live text, upload, on a foreground screen.** `android/opus` (libopus, JNI), `RecordingFile`, `AudioCapture`, the `RECORD_AUDIO` and `POST_NOTIFICATIONS` requests, a Record screen, one server with URL, key and Test, the foreground service already in place so the file survives the screen going off. When the recording stops, the service enqueues a WorkManager `OneTimeWorkRequest` (the worker calls `JobsClient.submit` and reports to the queue) and calls `stopSelf()`. No retries, no notification polish, no library yet. This is iOS M1 without the list.
+Done when: on a Pixel or an emulator, a 60 s recording against a real akou server shows live words within `tier_ms` plus about a second; the file uploads (202, then `done`); ffprobe's duration equals the file's own `seconds` (what `RecordingFile.finish` returns) and the number of samples `AudioRecord` delivered, within 20 ms for granule rounding; the encoder's preSkip reads 312 and bitrate 24000 on the device; and a 30 s airplane-mode gap in the middle shows a gap marker and the final transcript fills it.
+
+**A2. Background, locked phone, offline queue.** The ongoing notification with chronometer, pause/resume and stop actions; pause on `isClientSilenced` and auto-resume only for system pauses; route changes keep the file; the audio-server restart path; the full UploadQueue persisted and driven by WorkManager with its own backoff; requeue of interrupted uploads at start; the orphan-file sweep. This is iOS M2 without the tile.
+Done when: a 20 minute recording with the screen locked and the app swiped away produces one continuous file; an incoming phone call pauses it and it resumes after; a recording made in airplane mode uploads by itself when the network returns, once, with the same Idempotency-Key, and the local file is deleted only after read-back with keep_audio true and the setting off; a recording stopped from the notification shade's Stop button is found by the sweep at the next start and uploads.
+
+**A3. The library.** Job list with paging, detail with tap-to-seek through ExoPlayer, rename and delete, keep-a-copy setting, the Glance widget fed by the snapshot, the deep links. This is iOS M3.
+Done when: a job's words seek within 100 ms of their `s` on a phone copy and on the server's copy (Range), a renamed job shows the new title after refresh, delete leaves the phone copy, the widget shows the newest five with openings and opens the right job.
+
+**A4. One press to start, and the demo.** Quick Settings tile through a trampoline activity, static shortcuts, Live Update promotion on Android 16+, the demo mode (interceptor, DemoLiveText, Welcome screen, banner). Finishes iOS M2 and brings the demo across.
+Done when: on API 34, 35 and 36 with the app's process dead, a tile tap opens the trampoline, the service starts with `FOREGROUND_SERVICE_TYPE_MICROPHONE`, and the file receives audio pages within 3 s. Any `ForegroundServiceStartNotAllowedException` or `SecurityException` fails A4. If the tile path fails, dropping the tile (and keeping the notification and the static shortcut) is a separate decision, never a pass. The demo records, shows scripted words that pause with the recording, and never queues an upload.
+
+**A5. Several servers and history.** Server picker, per-server library, calls, dictations, files, call notes and summary, scopes re-read on open. This is iOS M5.
+Done when: a jobs-only key shows own recordings, a read key shows calls and dictations on a desktop akou, a call line seeks to a0 in the right part, a revoked key shows the refusal once and the Record to badge moves.
+
+**A6. Wear OS (deferred, mirrors iOS M4).** A `wear` module reusing `core` and `opus`, a microphone FGS, the file handed to the phone over the Data Layer or uploaded directly. Only if the watch recorder is still wanted (section 8).
+Done when: a watch recording lands as a done job on a real akou server.
+
+QR pairing (iOS M4, [M4.md](M4.md)) is not planned until the iOS side decides whether to ship it.
+
+## 5. Android-specific traps and how each is handled
+
+**Runtime permissions.** `RECORD_AUDIO` must be granted before capture starts, the counterpart of the iOS permission await (RecordingController.swift:78). `POST_NOTIFICATIONS` is a runtime permission on API 33+. Without it the service still records, but the notification with Pause/Resume/Stop and the chronometer never appears, so the user has no sign a recording runs and A2's controls vanish. The Record screen asks for both before the first recording and explains a refusal.
+
+**Foreground service type and the Play declaration.** Recording runs in a foreground service with `foregroundServiceType="microphone"`, permission `FOREGROUND_SERVICE_MICROPHONE`, started with `FOREGROUND_SERVICE_TYPE_MICROPHONE`. Play Console asks for a justification and a demo video per type. We budget one recorded demo, the same way the iOS App Review notes were prepared. Uploads use WorkManager, not a dataSync FGS, and the microphone service stops right after the recording, so only one type needs a declaration.
+
+**Background start limits (Android 14+).** A microphone FGS cannot start from the background, even under a start exemption. The documented carve-outs are a visible activity, a notification action and a widget tap. A Quick Settings tile tap is not one of them. The tile calls `startActivityAndCollapse(PendingIntent)` (API 34+; the `Intent` overload on API 31 to 33) to a transparent trampoline activity, and that activity starts the service. A4's done-when is a hard pass or fail. iOS has the same open question for its intent (DESIGN.md:41) and no recorded answer.
+
+**Service death.** Android 13+ lets the user stop any foreground service from the notification shade, and that removes the app with no callback. OEMs kill services as well. The start-up sweep in section 3.4 turns an orphaned file into an upload, so a killed recording is late, not lost.
+
+**Audio focus and interruptions.** Audio focus does not govern recording on Android. A phone call or the Assistant silences our `AudioRecord` instead of stopping it, so without a listener the file would hold silence and live text would show nothing. `registerAudioRecordingCallback` plus `isClientSilenced` maps to onInterruption(began/ended), and the controller pauses with `pausedBySystem` so it may auto-resume (RecordingController.swift:114-124). An audio server restart shows up as `ERROR_DEAD_OBJECT` from `read()` and is handled in AudioCapture. Playback never takes focus while a recording runs (RecordingPlayer.swift:169-175).
+
+**Doze and the upload queue.** WorkManager is deferrable under Doze. The queue's own state is the truth (UploadQueue.swift:69-79) and its backoff is ours, not WorkManager's (:88-90, :360-365). The queue's `notBefore` is the earliest retry. WorkManager's `initialDelay` is derived from it, clamped to at least 10 s (WorkManager's minimum), and Doze can push it later, so the waits in UploadQueueTests.swift:249 are earliest times, not exact ones. The first attempt is expedited with `OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST`, so a phone on Wi-Fi uploads at once. WorkManager stops a worker after 10 minutes. A long upload on a slow link is then cut and starts again from byte 0. That is safe because of the Idempotency-Key, and the stopped worker reports `unreachable` so the item goes back to pending. Stuck items are visible in the Library's "On this phone" section, as on iOS.
+
+**OEM battery killers.** Xiaomi, Huawei and some Samsung modes kill foreground services and defer work. We cannot fix that in code. The queue makes it visible, the server's Idempotency-Key makes retries safe, and Settings links the [dontkillmyapp.com](https://dontkillmyapp.com) guidance for the detected vendor.
+
+**16 KB page alignment.** Play requires 16 KB aligned native libraries for apps that target API 35 and later, so it applies at targetSdk 36. `:opus` builds with NDK r28 or newer. CI checks the `.so` alignment.
+
+**Cleartext and the local network.** Network security config cannot express CIDR ranges, the same way ATS could not (DESIGN.md:82). The base config permits cleartext and `Endpoint` stays the only gate, with the source-scan test. Android 17 (targetSdk 37, our next bump) adds the `ACCESS_LOCAL_NETWORK` runtime permission. Without it, TCP to a LAN akou times out with no clear error. Whether 100.64/10 over Tailscale counts as local is undocumented. We test it before raising targetSdk to 37, and the Test button explains the failure.
+
+**The Ogg CRC is not zlib's.** `java.util.zip.CRC32` is reflected with a final XOR. The server refuses every page with bad_page (ogg.ts:85). The hand-written table from OggCRC.swift:6-19 is pinned by the 0x89A1897F check value.
+
+**OkHttp WebSocket send never waits.** `send()` queues up to 16 MiB and returns true. The iOS `behind` rule depends on each send completing before the next (LiveSession.swift:233-259). OkHttp has no per-message completion, so `queueSize()` is the only signal. The port rule is in the LiveSession row: one page in OkHttp's buffer at a time, the rest in our own queue, 25 pages and the session drops. Without it the server's too_fast at 30 s (live.ts:67) would be the first thing that notices.
+
+**Pings.** OkHttp's public `WebSocket` has no ping method, so the iOS hand-made ping cannot be ported. We set `pingInterval(20 s)`. A pong that does not arrive within 20 s fails the socket, which LiveSession treats as `network` and reopens with backoff.
+
+**Redirects.** OkHttp follows cross-host redirects by default. iOS returns the 3xx as the answer (Sessions.swift:24-31). `followRedirects(false)` plus the same-origin interceptor, on the one shared client that ExoPlayer also uses.
+
+**Read timeouts.** OkHttp's default read timeout is 10 s, shorter than a 30 s long poll. The per-route timeouts are in the JobsClient row.
+
+**DELETE without a body loses its Content-Type.** akou answers 415 json_required (JobsClient.swift:141-145). We send an empty body typed `application/json` and check it against a real server in A3.
+
+**kotlinx.serialization defaults.** `encodeDefaults` is off by default, so a hello built from defaults would drop `v`, `codec`, `language` and `model`, and the server refuses it (live.ts:426-428). The hello test in section 3.2 builds one from defaults and checks the key set.
+
+**Character counting.** Swift counts grapheme clusters; Kotlin `String.length` counts UTF-16 units. TranscriptDigest counts grapheme clusters with `BreakIterator` so emoji and CJK text cut the same way on both apps. LiveTranscript only looks at the first and last character of a token.
+
+**Keys and backup.** On some OEMs, and after some restores, a Keystore key is lost even without a user-auth requirement. The encrypted key file is excluded from Auto Backup and device transfer, and a decrypt failure reads as "key missing, enter it again", never as a crash. The server list may back up; the keys never do, which matches `ThisDeviceOnly` on iOS (KeyStore.swift:43).
+
+**Storage class.** Recordings and the queue file live in credential-encrypted `filesDir`, never device-protected storage (readable before first unlock, weaker than iOS) and never a cache directory the system can clear.
+
+**applicationId.** The iOS id `io.github.geiserx.akou-companion` (Base.xcconfig:12) is not a valid Android id, because hyphens are not allowed. The Android id is `io.github.geiserx.akou` (decided). It can never change once released on Play.
+
+**Concurrency group.** Concurrency groups are repo-wide. The Android workflow uses `android-${{ github.ref }}`; a `ci-*` name would cancel the iOS jobs (ci.yml:12-13).
+
+**The ffprobe test skips itself.** OggTests.swift:153-156 throws `XCTSkip` without ffprobe, so a CI without ffmpeg reports green without the only independent decoder check. The Android CI installs ffmpeg, and the Kotlin test fails, not skips, when ffprobe is missing.
+
+**Only one microphone thread.** The iOS tap crashed on the first buffer of every real recording until #17 (commit `0d99ae2`), and the fake sample source hid it. iOS now has a regression test for it in `App/Tests/AudioCaptureTests.swift`. On Android the `AudioRecord` loop runs on its own thread, and A1 includes an instrumented test that drives the real capture path.
+
+## 6. CI, signing, distribution
+
+**CI.** The repo is public, so Android jobs run on GitHub-hosted `ubuntu-latest`. A separate `.github/workflows/android.yml` has one always-reporting job named `Android`. `dorny/paths-filter` makes it pass at once when nothing under `android/`, the fixtures, `App/Sources/Demo/Samples/`, `docs/PROTOCOL.md` or the workflow changed. Actions are pinned by SHA: checkout with `persist-credentials: false`, setup-java temurin 17, gradle/actions/setup-gradle. The job runs `apt-get install ffmpeg`, then `./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug`, piped through `tee` and failed on "Executed 0 tests". A0 proves both the path filter and that guard can go red.
+
+The emulator job (`reactivecircus/android-emulator-runner`, x86_64 `google_apis` API 34 to 36, after the `/dev/kvm` udev rule) runs the instrumented tests: the `:opus` encoder checks, the fake live server, and the real `AudioRecord` path, which records silence on a runner. It runs on main and by hand until it has proved stable, and only then joins the required check. The real-server end-to-end test skips on CI without `AKOU_E2E_*` variables, as App/Tests/EndToEndTests.swift does.
+
+The main ruleset requires only `ci-ok` today (ci.yml:65-73). A job in `android.yml` cannot be a `needs` of `ci-ok`, because `needs` works only inside one workflow. So the choice is a second required check named `Android`, or moving the Android job into `ci.yml` under `ci-ok`. That is open decision 2.
+
+**Signing.** One new release keystore (RSA 4096, PKCS12), kept outside the repository with an offline backup. Its certificate SHA-256 is pinned in this doc when it exists. Four Actions secrets hold it: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. `android-release.yml` triggers on `android-v*` tags only, so the iOS release path never fires. It builds an AAB for Play and an APK for the GitHub release, runs `apksigner verify --print-certs`, refuses an APK whose signer does not match the pinned fingerprint, and attaches the APK to the GitHub release.
+
+**Distribution.** Google Play's internal testing track is the release track (decided; a Play developer account exists). Internal testing takes up to 100 testers by email with no review, and plays the role TestFlight plays on iOS. The 12-tester, 14-day closed test is needed only before production. We use Play App Signing: Google holds the app signing key, and our keystore is the upload key. The first AABs go up by hand in Play Console; a publishing action with a service-account secret can come later.
+
+GitHub releases ship the APK alongside. The two builds have different signers (Play's app signing key and ours), so a user picks one source. An install from one does not update from the other.
+
+Google's developer verification is in force. Since 30 September 2026, certified devices in Brazil, Indonesia, Singapore and Thailand refuse a normal install of an APK whose signer is not registered to a verified developer, from any source. The global rollout follows in 2027. Before the first `android-v*` tag, we register our release signing certificate in the same developer account, so the GitHub APK installs everywhere. This is on the release checklist.
+
+Play asks for the microphone FGS declaration (above) and the Data safety form. In the form, recordings go only to the user's own server, and the answer to "is all data encrypted in transit" is no: Endpoint allows plain http to a private address (Endpoint.swift:48-60).
+
+F-Droid stays possible later. GPL-3.0-or-later qualifies, no Play services or Firebase are used, and libopus from source is accepted. With reproducible builds F-Droid ships our signed APK, which keeps the verification registration valid.
+
+The NOTICE's section 7 permission names Apple's stores only. The plain GPL is enough for Play as long as the listing links the source (open decision 1).
+
+## 7. Documentation rules carried over
+
+A change to the protocol models changes `docs/PROTOCOL.md` in the same PR (AGENTS.md:47). With `android/core/protocol` in the same repo, that PR also changes the Kotlin models, so the two clients cannot drift unnoticed. Every milestone's measured result (lag, data per hour, the tile answer) goes into this doc when it is measured.
+
+## 8. Decisions
+
+### Decided
+
+1. **Repo.** `android/` inside akou-companion. One protocol rule, shared fixtures and NOTICE, one issue tracker.
+2. **Google Play.** The internal testing track is the release track, with GitHub releases alongside. The release signing certificate is registered in the same developer account for developer verification.
+3. **applicationId.** `io.github.geiserx.akou`. Permanent once released.
+4. **minSdk.** 31 (Android 12). It gives `setCommunicationDevice`, the clearer FGS start rules and one backup config (`dataExtractionRules`).
+
+### Pending the owner
+
+Each one lists the default this plan assumes until the owner decides.
+
+1. **License.** Keep GPL-3.0-or-later with no new store exception, or add a Play-specific section 7 permission like Apple's. Default: GPL-3.0-or-later unchanged.
+2. **Required check.** `Android` as a second required status check, or the Android job moved into `ci.yml` under `ci-ok`, so every iOS PR waits on it too. Default: a second required check named `Android`, added once A0 lands.
+3. **Byte-identical Opus packets.** Require them with a shared golden test, or accept identical Ogg framing only. Default: identical Ogg framing only.
+4. **Wear OS (A6).** In scope or dropped. Default: deferred, not planned until the phone app ships.
+5. **IzzyOnDroid.** Submit there as well, or not. Default: not submitted; Play and GitHub releases cover distribution.

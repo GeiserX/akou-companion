@@ -56,6 +56,7 @@ To run it on a phone, put your team id in `App/Config/Local.xcconfig` as `DEVELO
 - [Design and milestones](docs/DESIGN.md)
 - [M4 plan](docs/M4.md): QR pairing and the Apple Watch
 - [TestFlight](docs/TESTFLIGHT.md): putting a build on your own iPhone
+- [Android plan](docs/ANDROID.md): the Android app, its milestones and the decisions it needs
 - [The live protocol](docs/PROTOCOL.md): akou's `GET /v1/live`, frames, messages, close codes
 - [akou server guide](https://github.com/GeiserX/akou/blob/main/docs/server.md): running the server the app talks to
 
