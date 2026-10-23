@@ -51,6 +51,8 @@ xcodegen generate --spec App/project.yml && open App/AkouCompanion.xcodeproj
 
 To run it on a phone, put your team id in `App/Config/Local.xcconfig` as `DEVELOPMENT_TEAM = <id>`.
 
+The Android app is in `android/` and builds with JDK 17 and the Android SDK: `cd android && ./gradlew :core:test :app:assembleDebug`.
+
 ## Documentation
 
 - [Design and milestones](docs/DESIGN.md)
