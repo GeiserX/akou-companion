@@ -42,11 +42,12 @@ import kotlin.test.assertTrue
  * 30 s airplane-mode gap that shows as a gap marker, then the upload through the app's own
  * settings, queue and WorkManager worker, read back until the job is done.
  *
- * Left out of `connectedDebugAndroidTest` (app/build.gradle.kts); run it with `am instrument -e
- * class io.github.geiserx.akou.EndToEndTests`. It skips unless given three instrumentation
- * arguments: `akouE2eUrl` (a server with live text), `akouE2eKeyFile` (a device path holding a
- * bare `ak_` key with the jobs scope) and `akouE2ePcm` (a device path holding speech as 16 kHz
- * mono float32 little-endian, played in a loop in real time).
+ * Left out of `connectedDebugAndroidTest` (app/build.gradle.kts); run it with `adb shell am
+ * instrument -w -e class io.github.geiserx.akou.EndToEndTests -e akouE2eUrl ... -e akouE2eKeyFile
+ * ... -e akouE2ePcm ... io.github.geiserx.akou.test/androidx.test.runner.AndroidJUnitRunner`. It
+ * skips unless given its three instrumentation arguments: `akouE2eUrl` (a server with live text),
+ * `akouE2eKeyFile` (a device path holding a bare `ak_` key with the jobs scope) and `akouE2ePcm` (a
+ * device path holding speech as 16 kHz mono float32 little-endian, played in a loop in real time).
  * The microphone is not used: the emulator's is silent.
  */
 @RunWith(AndroidJUnit4::class)

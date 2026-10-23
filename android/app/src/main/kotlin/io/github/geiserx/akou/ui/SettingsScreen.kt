@@ -74,7 +74,13 @@ fun SettingsScreen(onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Server", style = MaterialTheme.typography.headlineMedium)
-            TextButton(onClick = { scope.launch { if (url.isBlank() || save()) onBack() } }) { Text("Done") }
+            TextButton(onClick = {
+                scope.launch {
+                    // Nothing typed and nothing saved closes; a cleared saved address stays, with the reason.
+                    val nothingSaved = url.isBlank() && settings.book().server(id) == null
+                    if (nothingSaved || save()) onBack()
+                }
+            }) { Text("Done") }
         }
         OutlinedTextField(
             value = url, onValueChange = { url = it }, label = { Text("Address") },
