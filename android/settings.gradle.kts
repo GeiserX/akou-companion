@@ -16,4 +16,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "akou-companion"
-include(":core", ":app")
+include(":core", ":opus", ":app")
