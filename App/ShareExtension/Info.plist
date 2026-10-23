@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>akou</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<!-- The same types as SharedInbox.acceptedTypes; ShareKeyBoundaryTests checks both. -->
+			<key>NSExtensionActivationRule</key>
+			<string>SUBQUERY(extensionItems, $item, SUBQUERY($item.attachments, $a, ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.audio" OR ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.mpeg-4-audio" OR ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "com.apple.m4a-audio" OR ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "public.mp3" OR ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "com.microsoft.waveform-audio" OR ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "com.apple.coreaudio-format" OR ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "org.xiph.ogg-audio" OR ANY $a.registeredTypeIdentifiers UTI-CONFORMS-TO "org.xiph.opus").@count &gt;= 1).@count &gt;= 1</string>
+		</dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.share-services</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
+	</dict>
+</dict>
+</plist>

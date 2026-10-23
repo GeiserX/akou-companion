@@ -26,6 +26,7 @@ final class FakeAkouHTTP: URLProtocol, @unchecked Sendable {
         var headers: [String: String]
         var fields: [String: String]
         var fileName: String?
+        var fileContentType: String?
         var fileBytes: Data?
     }
 
@@ -78,6 +79,7 @@ final class FakeAkouHTTP: URLProtocol, @unchecked Sendable {
             for p in parts {
                 if p.fileName != nil {
                     seen.fileName = p.fileName
+                    seen.fileContentType = p.contentType
                     seen.fileBytes = p.value
                 } else {
                     seen.fields[p.name] = String(decoding: p.value, as: UTF8.self)
@@ -190,7 +192,7 @@ final class FakeAkouHTTP: URLProtocol, @unchecked Sendable {
         return out
     }
 
-    struct Part { var name: String; var fileName: String?; var value: Data }
+    struct Part { var name: String; var fileName: String?; var contentType: String?; var value: Data }
 
     /// A small multipart reader: enough for the bodies `Multipart.write` makes.
     static func parts(_ body: Data, boundary: String) -> [Part] {
@@ -213,7 +215,9 @@ final class FakeAkouHTTP: URLProtocol, @unchecked Sendable {
                 return tail.firstIndex(of: "\"").map { String(tail[..<$0]) }
             }
             guard let name = param("name") else { continue }
-            out.append(Part(name: name, fileName: param("filename"), value: value))
+            let type = head.components(separatedBy: "\r\n").first { $0.lowercased().hasPrefix("content-type:") }
+                .map { String($0.dropFirst("content-type:".count)).trimmingCharacters(in: .whitespaces) }
+            out.append(Part(name: name, fileName: param("filename"), contentType: type, value: value))
         }
         return out
     }

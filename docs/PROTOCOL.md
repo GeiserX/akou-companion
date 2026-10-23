@@ -93,7 +93,7 @@ The trade this design accepts is that the audio exists only on the phone until t
 
 The file goes up as a normal akou job:
 
-- `POST /v1/jobs` (multipart) with `file=<id>.opus`, `title`, `language`, `model` or `preset` when the user chose one, `keep_audio=true`, `metadata` (`{"companion":1,"recording_id":"...","workspace":"..."}`, at most 4 KB of JSON) and the header `Idempotency-Key: <recording id>`. The upload runs from a background `URLSession` with the body in a file.
+- `POST /v1/jobs` (multipart) with `file=<id>.opus` (`audio/ogg`; audio shared from another app keeps its own type, such as `<id>.m4a` as `audio/mp4`), `title`, `language`, `model` or `preset` when the user chose one, `keep_audio=true`, `metadata` (`{"companion":1,"recording_id":"...","workspace":"..."}`, at most 4 KB of JSON) and the header `Idempotency-Key: <recording id>`. The upload runs from a background `URLSession` with the body in a file.
 - The answer is 202 with a new job, or 200 with the first job when the same key, file and options came before, so a retried upload never makes a second job. The same key with another file or other options is 422 `idempotency_conflict` (with the first job's `id` and the differing `fields`). A full queue is 429 `queue_full` with `Retry-After` in seconds, answered before the body is read.
 - `keep_audio` and `metadata` are not compared on a repeated key: a retry gets the first job as it was made. The phone reads `keep_audio` from the job it gets back, never from what it sent.
 - Workspaces are a desktop-only route, so on a server the workspace is the label in `metadata`. Every job answer carries `keep_audio` and `metadata`.

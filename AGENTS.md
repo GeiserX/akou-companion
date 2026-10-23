@@ -17,6 +17,9 @@ server. The design is [docs/DESIGN.md](docs/DESIGN.md); the wire protocol is
   intent that both targets contain. The record intents call `RecordIntentHost`, which each target
   defines for itself (`App/Sources/Intents/` drives the recorder; `App/Widgets/` refuses). The two
   targets share the App Group `group.io.github.geiserx.akou-companion` (`App/Config/*.entitlements`).
+- `App/ShareExtension/` is the share sheet's "akou": it copies shared audio into the App Group
+  (`SharedInbox` in AkouClient) and the app queues it at launch and on becoming active. It shares
+  the same App Group and, like the widgets, holds no key (`ShareKeyBoundaryTests`).
 
 ## Build and test
 

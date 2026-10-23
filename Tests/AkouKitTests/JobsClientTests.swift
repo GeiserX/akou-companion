@@ -44,7 +44,31 @@ final class JobsClientTests: XCTestCase {
         XCTAssertEqual(meta?["recording_id"] as? String, "rec-1")
         XCTAssertEqual(meta?["workspace"] as? String, "Work")
         XCTAssertEqual(req.fileName, "rec-1.opus")
+        XCTAssertEqual(req.fileContentType, "audio/ogg")
         XCTAssertEqual(req.fileBytes, Data("OggS fake audio".utf8))
+    }
+
+    func testAudioSharedFromAnotherAppGoesUpWithItsOwnNameAndType() async throws {
+        let audio = dir.appending(path: "memo.m4a")
+        try Data("ftypM4A fake".utf8).write(to: audio)
+        let s = JobsClient.Submission(recordingID: "rec-3", title: "New Recording 3", audioFileName: "rec-3.m4a", audioContentType: "audio/mp4")
+        _ = try await client().submit(s, audio: audio, bodyFile: dir.appending(path: "body"))
+
+        let req = try XCTUnwrap(FakeAkouHTTP.seen.first)
+        XCTAssertEqual(req.headers["idempotency-key"], "rec-3")
+        XCTAssertEqual(req.fileName, "rec-3.m4a")
+        XCTAssertEqual(req.fileContentType, "audio/mp4")
+        XCTAssertEqual(req.fields["title"], "New Recording 3")
+        XCTAssertEqual(req.fileBytes, Data("ftypM4A fake".utf8))
+    }
+
+    func testASubmissionQueuedBeforeSharedAudioDecodesWithTheOpusDefaults() throws {
+        let old = Data(#"{"recordingID":"rec-4","keepAudio":true,"title":"t"}"#.utf8)
+        let s = try JSONDecoder().decode(JobsClient.Submission.self, from: old)
+        XCTAssertNil(s.audioFileName)
+        XCTAssertNil(s.audioContentType)
+        XCTAssertEqual(s.uploadFileName, "rec-4.opus")
+        XCTAssertEqual(s.uploadContentType, "audio/ogg")
     }
 
     func testARepeatedSubmitGetsTheFirstJob() async throws {
