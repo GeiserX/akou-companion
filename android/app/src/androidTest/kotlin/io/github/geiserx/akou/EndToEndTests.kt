@@ -9,6 +9,7 @@ import io.github.geiserx.akou.core.client.JobsClient
 import io.github.geiserx.akou.core.client.LiveTranscript
 import io.github.geiserx.akou.core.client.ServerProbe
 import io.github.geiserx.akou.core.client.UploadQueue
+import io.github.geiserx.akou.core.protocol.Job
 import io.github.geiserx.akou.opus.LibopusEncoder
 import io.github.geiserx.akou.recorder.Recorder
 import io.github.geiserx.akou.recorder.RecordingFile
@@ -29,6 +30,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.UUID
@@ -40,9 +42,11 @@ import kotlin.test.assertTrue
  * 30 s airplane-mode gap that shows as a gap marker, then the upload through the app's own
  * settings, queue and WorkManager worker, read back until the job is done.
  *
- * Skips unless given three instrumentation arguments: `akouE2eUrl` (a server with live text),
- * `akouE2eKeyFile` (a device path holding a bare `ak_` key with the jobs scope) and `akouE2ePcm` (a
- * device path holding speech as 16 kHz mono float32 little-endian, played in a loop in real time).
+ * Left out of `connectedDebugAndroidTest` (app/build.gradle.kts); run it with `am instrument -e
+ * class io.github.geiserx.akou.EndToEndTests`. It skips unless given three instrumentation
+ * arguments: `akouE2eUrl` (a server with live text), `akouE2eKeyFile` (a device path holding a
+ * bare `ak_` key with the jobs scope) and `akouE2ePcm` (a device path holding speech as 16 kHz
+ * mono float32 little-endian, played in a loop in real time).
  * The microphone is not used: the emulator's is silent.
  */
 @RunWith(AndroidJUnit4::class)
@@ -123,9 +127,18 @@ class EndToEndTests {
         }
         val jobs = JobsClient(url, key)
         val job = withTimeout(600_000) {
-            var job = jobs.job(jobId, wait = 30)
-            while (!job.ended) job = jobs.job(jobId, wait = 30)
-            job
+            var job: Job? = null
+            while (job?.ended != true) {
+                // A long poll on a connection the network cut left half dead fails once; poll again.
+                job = try {
+                    jobs.job(jobId, wait = 30)
+                } catch (e: IOException) {
+                    Log.i(TAG, "job poll failed: ${e.message}")
+                    delay(2_000)
+                    job
+                }
+            }
+            job!!
         }
         assertEquals("done", job.status, job.error)
         val text = jobs.result(jobId).text

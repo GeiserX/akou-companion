@@ -15,6 +15,9 @@ android {
         versionCode = 1
         versionName = "0.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // The real-server test runs only by hand (`am instrument -e class ...EndToEndTests` with its
+        // arguments). Skipped through an assumption, AGP writes it into the results as a failure.
+        testInstrumentationRunnerArguments["notClass"] = "io.github.geiserx.akou.EndToEndTests"
     }
 
     compileOptions {
