@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Network security config cannot name CIDR ranges, so cleartext is permitted here and Endpoint
+     (android/core, client/Endpoint.kt) is the only gate: https always, plain http only to a private
+     IP literal (127/8, 10/8, 172.16/12, 192.168/16, 100.64/10, ::1, fc00::/7), never to a host name.
+     Every request and the live socket build their URL through Endpoint (TransportPolicyTests). -->
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <base-config cleartextTrafficPermitted="true" tools:ignore="InsecureBaseConfiguration">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

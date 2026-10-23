@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- The servers' keys never leave the phone: filesDir/keys (KeystoreSecretStore.DIRECTORY) is excluded
+     from cloud backup and from device transfer. Its AndroidKeyStore key would not come along anyway. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="keys/" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="keys/" />
+    </device-transfer>
+</data-extraction-rules>
