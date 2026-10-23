@@ -52,3 +52,6 @@ tasks.test {
         }
     })
 }
+
+// Positive control: hide every test source so the CI guard must fail the job.
+sourceSets { test { kotlin.setSrcDirs(listOf("src/test/none")) } }
