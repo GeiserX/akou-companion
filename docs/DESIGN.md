@@ -40,6 +40,37 @@ Settings (URL, key in the Keychain, a test button), a big record button, the liv
 
 Recording keeps going with the screen locked. One control starts and stops it from the Action button, the Lock Screen and Control Center, and the Live Activity shows the state, the elapsed time and the last line. Interruptions (a phone call, Siri) pause the recording; tapping the activity opens the app and continues in the same file. Recordings made with no server in reach upload by themselves when it comes back, once. The first task is a device test of the open question: can the record intent start recording cold from a locked phone without bringing the app forward?
 
+#### Starting cold from a locked phone
+
+**The question.** Can the Action button, the record control or a Shortcut start a recording on a locked phone, with akou's process not running, without the app coming forward?
+
+**What Apple documents.**
+
+- An `AudioRecordingIntent` (iOS 18) tells the system the app records audio, and the system shows its recording indicator. On iPhone the app "must start a Live Activity when you begin the audio recording and keep it active as long as you record audio. If you don't start a Live Activity, the audio recording stops." https://developer.apple.com/documentation/appintents/audiorecordingintent
+- A `LiveActivityIntent` is the exception to "an app starts a Live Activity only in the foreground": when the system performs one, it "launches your app process without opening the app, performs the intent, and starts the Live Activity", and Apple names a Control Center control as the example. https://developer.apple.com/documentation/appintents/liveactivityintent and https://developer.apple.com/documentation/activitykit/activity/request(attributes:content:pushtype:)
+- An intent's `authenticationPolicy` defaults to `alwaysAllowed`, which "allows the intent to run without authentication, including when the device is locked". https://developer.apple.com/documentation/appintents/appintent/authenticationpolicy
+- Controls run an app intent from Control Center, the Lock Screen and the Action button; a toggle uses a `SetValueIntent`, and an `OpenIntent` is what opens the app. https://developer.apple.com/documentation/widgetkit/creating-controls-to-perform-actions-across-the-system
+- `openAppWhenRun` and `ForegroundContinuableIntent` are deprecated in iOS 26 in favour of `supportedModes` (iOS 26 only). An intent that sets none of them is not asked to come forward. https://developer.apple.com/documentation/appintents/appintent/openappwhenrun and https://developer.apple.com/documentation/appintents/appintent/supportedmodes
+- Apple documents no general rule about starting the microphone from the background; the background route it does document is the `AudioRecordingIntent` and `LiveActivityIntent` pair above. The nearest refusal it names, `cannotStartRecording`, "usually occurs when an app starts a mixable recording from the background and it isn't configured as an Inter-App Audio app". akou's session is not mixable (`.playAndRecord` without `.mixWithOthers` in `AudioCapture.swift`), so that case does not apply. https://developer.apple.com/documentation/coreaudiotypes/avaudiosession/errorcode/cannotstartrecording
+
+**What the code does.** It already takes the documented route, so no code change was needed for this question:
+
+- `StartRecordingIntent`, `StopRecordingIntent` and the control's `ToggleRecordingIntent` (a `SetValueIntent`) are each `AudioRecordingIntent` and `LiveActivityIntent` ([`App/Shared/RecordIntents.swift`](../App/Shared/RecordIntents.swift)). None sets `openAppWhenRun`, `supportedModes` or `authenticationPolicy`, and none is an `OpenIntent`, so nothing asks for the app to come forward or for the phone to unlock.
+- They are compiled into the app and the widget extension. The extension's `RecordIntentHost` refuses with "Recording starts in the akou app", so a press that ran in the extension would say so instead of failing silently.
+- A cold launch runs `AkouCompanionApp.init`, the app's `@main` entry point, which hands `RecordingController.shared` to the intents before `perform()` can reach it.
+- `RecordingController.start` starts the microphone and requests the Live Activity in the same main-actor turn, with no `await` between them ([`RecordingController.swift`](../App/Sources/Recorder/RecordingController.swift)). `UIBackgroundModes` has `audio` and `NSSupportsLiveActivities` is true ([`Info.plist`](../App/Sources/Info.plist)). The deployment target is iOS 18.0, the first release with `AudioRecordingIntent`, so nothing needs an availability check.
+- What a locked phone can reach: the recording file is `completeUntilFirstUserAuthentication`, and the key is `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, so a phone unlocked once since it booted can write the file and send live text.
+
+**What stays unproven until a real phone runs it.**
+
+- That the system runs `perform()` in the app process for the control and the Action button, and not in the widget extension. Apple documents the app process for `LiveActivityIntent` in general; the device test shows which one ran.
+- That the microphone actually starts from a cold, locked launch, with no foreground step, and that the recording indicator and the Live Activity appear.
+- What happens with Live Activities turned off for akou in Settings. `ActivityController.start` then records without one, and Apple says the system stops the audio in that case; the app does not yet notice that.
+- Before the first unlock after a reboot, the file cannot be written. A recording started then fails, and that is accepted.
+- The microphone permission prompt cannot show on a locked phone, so the permission must have been granted once in the app.
+
+The device procedure is in [TESTFLIGHT.md](TESTFLIGHT.md#device-check-recording-from-a-locked-phone). **Device result:** not run yet. Write the date, the phone model, the iOS version, the build number and pass or fail for each entry point here once it has been.
+
 ### M3: the server as the library
 
 Each recording has a workspace, chosen per recording and sent as a label in the job's metadata. The recordings list comes from the server, so it survives a reinstall; playback streams from the server when there is no local copy; rename and delete go to the server. A setting keeps a copy on the phone too.
