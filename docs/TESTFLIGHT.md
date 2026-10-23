@@ -47,9 +47,10 @@ Before you start:
 - A TestFlight build is installed, a server and key are set and Test passes.
 - You have made one recording from the app, so the microphone permission is granted.
 - Live Activities are on for akou (Settings, akou, Live Activities).
-- The record control is on the Action button (Settings, Action Button, Controls) and in Control Center, and the phone has been unlocked at least once since it booted.
+- The record control is on the Action button (Settings, Action Button, Controls), in Control Center, and in a Lock Screen control slot (touch and hold the Lock Screen, Customize, Lock Screen, then replace the bottom-left or bottom-right control), and the phone has been unlocked at least once since it booted.
+- Allow Siri When Locked is on (Settings, Apple Intelligence & Siri). With it off, Siri itself asks to unlock before it runs any intent, which is not an akou fail.
 
-For each entry point (the Action button, the Control Center control on the Lock Screen, and "Start recording in akou" through Siri or the Shortcuts action):
+For each entry point (the Action button, the Control Center control opened from the Lock Screen, the Lock Screen control in the bottom corner, and Siri: "Start recording in akou"). The Shortcuts app needs an unlocked phone, so it is not a locked-phone entry point:
 
 1. Unlock, swipe akou away in the app switcher so its process is gone, then lock the phone and wait 30 seconds.
 2. Without unlocking, trigger the entry point. Speak for about 20 seconds.
