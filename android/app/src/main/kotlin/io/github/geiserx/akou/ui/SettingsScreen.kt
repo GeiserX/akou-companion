@@ -59,7 +59,14 @@ fun SettingsScreen(onBack: () -> Unit) {
         ServerForm.urlProblem(url)?.let { result = it; return false }
         val saved = ServerForm.save(settings.book(), sid, url, key, savedKey)
         settings.save(saved.book)
-        if (saved.keyChanged && settings.keys.save(key, sid.toString())) savedKey = key.trim().ifEmpty { null }
+        if (saved.keyChanged) {
+            // A failed save does not count as changed (KeyStore.swift): say so, and test nothing.
+            if (!settings.keys.save(key, sid.toString())) {
+                result = "The key could not be stored on this phone. Enter it again."
+                return false
+            }
+            savedKey = key.trim().ifEmpty { null }
+        }
         if (saved.entry.tested == null) result = null
         return true
     }
@@ -67,7 +74,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("Server", style = MaterialTheme.typography.headlineMedium)
-            TextButton(onClick = { scope.launch { save(); onBack() } }) { Text("Done") }
+            TextButton(onClick = { scope.launch { if (url.isBlank() || save()) onBack() } }) { Text("Done") }
         }
         OutlinedTextField(
             value = url, onValueChange = { url = it }, label = { Text("Address") },

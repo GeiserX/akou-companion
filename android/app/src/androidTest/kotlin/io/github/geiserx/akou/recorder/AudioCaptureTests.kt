@@ -64,7 +64,7 @@ class AudioCaptureTests {
         // The file's seconds are the delivered samples, rounded up to the padded last 20 ms frame.
         val samplesSeconds = delivered / 16000.0
         assertTrue(abs(finish.seconds - samplesSeconds) < 0.02 + 1e-9, "file ${finish.seconds} s, delivered $samplesSeconds s")
-        assertEquals(312L + (finish.seconds * 48000).toLong(), pages.last().granulePosition)
+        assertEquals(312L + Math.round(finish.seconds * 48000), pages.last().granulePosition)
         file.delete()
     }
 }

@@ -101,4 +101,27 @@ class UploadPassTests {
         assertEquals(UploadQueue.State.Pending, item.state)
         assertEquals("the upload was stopped", item.lastError)
     }
+
+    @Test
+    fun aStoppedWorkerPutsEveryClaimedUploadBackToPending() = runTest {
+        val q = queue().apply { add("rec-8"); add("rec-9") }
+        val stopping = UploadQueue.Transport { throw CancellationException("stopped") }
+        assertFailsWith<CancellationException> { UploadPass(q, stopping).run(setOf(server), server, clients) }
+        assertEquals(listOf(UploadQueue.State.Pending, UploadQueue.State.Pending), q.items.map { it.state })
+    }
+
+    @Test
+    fun aRequestThatCannotBeSentWaitsAndTheNextOneStillGoes() = runTest {
+        val q = queue().apply { add("rec-10"); add("rec-11") }
+        var n = 0
+        val flaky = UploadQueue.Transport { r ->
+            n += 1
+            if (n == 1) throw IllegalStateException("no request") else UploadQueue.Answer.Http(202, Headers.headersOf(), """{"id":"job-11","status":"queued"}""".encodeToByteArray()).also { sent += r }
+        }
+        UploadPass(q, flaky).run(setOf(server), server, clients)
+        val first = q.item("rec-10")!!
+        assertEquals(UploadQueue.State.Pending, first.state)
+        assertEquals("no request", first.lastError)
+        assertEquals(UploadQueue.State.Submitted("job-11"), q.item("rec-11")!!.state)
+    }
 }
