@@ -18,7 +18,7 @@ object OggCRC {
         r
     }
 
-    private val table = table(POLY)
+    private val table = table(POLY xor 1)
 
     fun checksum(bytes: ByteArray, seed: UInt = 0u): UInt = checksum(bytes, seed, table)
 
