@@ -51,6 +51,8 @@ jobs:
       # The ffprobe parity test fails, never skips, without ffprobe.
       - name: Install ffmpeg
         if: steps.changes.outputs.android == 'true'
+        # apt mirrors sometimes hang; fail fast so the run can be retried.
+        timeout-minutes: 10
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends ffmpeg
