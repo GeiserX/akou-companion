@@ -63,7 +63,7 @@ final class SharedInboxTests: XCTestCase {
         XCTAssertEqual(SharedInbox.fileExtension(["json", "../x", "WAV"]), "wav")
         XCTAssertEqual(SharedInbox.fileExtension(["", "json"]), "audio")
         // A title the server would refuse with a 422 is made one it takes.
-        let long = try SharedInbox.add(file: try shared(String(repeating: "é", count: 150) + ".m4a"), typeIdentifier: "com.apple.m4a-audio", suggestedName: String(repeating: "😀", count: 150) + ".m4a", to: inbox)
+        let long = try SharedInbox.add(file: try shared("long.m4a"), typeIdentifier: "com.apple.m4a-audio", suggestedName: String(repeating: "😀", count: 150) + ".m4a", to: inbox)
         XCTAssertEqual(long.title, String(repeating: "😀", count: 100))
         XCTAssertEqual(SharedInbox.title("a\u{1B}[31m\tb\u{0}  c\n"), "a [31m b c")
         XCTAssertEqual(SharedInbox.title("\u{7}\n"), "")
@@ -79,16 +79,17 @@ final class SharedInboxTests: XCTestCase {
         try Data("a".utf8).write(to: old)
         try Data("b".utf8).write(to: fresh)
         try fm.setAttributes([.modificationDate: now.addingTimeInterval(-SharedInbox.orphanAge - 60)], ofItemAtPath: old.path)
-        // A file whose sidecar is there but cannot be queued yet stays, however old.
+
+        try await SharedInbox.importPending(from: inbox, into: queue, folder: folder, defaultServer: server, now: now)
+        XCTAssertFalse(fm.fileExists(atPath: old.path))
+        XCTAssertTrue(fm.fileExists(atPath: fresh.path))
+
+        // A file whose sidecar is beside it stays, however old.
         let kept = try SharedInbox.add(file: try shared("kept.m4a"), typeIdentifier: "com.apple.m4a-audio", suggestedName: nil, to: inbox)
         let keptFile = inbox.appending(path: kept.fileName)
         try fm.setAttributes([.modificationDate: now.addingTimeInterval(-SharedInbox.orphanAge - 60)], ofItemAtPath: keptFile.path)
         SharedInbox.sweepOrphans(in: inbox, now: now)
         XCTAssertTrue(fm.fileExists(atPath: keptFile.path))
-
-        try await SharedInbox.importPending(from: inbox, into: queue, folder: folder, defaultServer: server, now: now)
-        XCTAssertFalse(fm.fileExists(atPath: old.path))
-        XCTAssertTrue(fm.fileExists(atPath: fresh.path))
     }
 
     func testOnlyAudioIsTaken() {
