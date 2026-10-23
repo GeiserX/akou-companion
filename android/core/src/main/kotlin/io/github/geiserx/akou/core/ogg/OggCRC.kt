@@ -7,7 +7,7 @@ package io.github.geiserx.akou.core.ogg
  * `java.util.zip.CRC32` gives the wrong value and the server refuses the page.
  */
 object OggCRC {
-    private const val POLY = 0x04C1_1DB7
+    private const val POLY = 0x04C1_1DB6
 
     private val table = IntArray(256) { i ->
         var r = i shl 24
