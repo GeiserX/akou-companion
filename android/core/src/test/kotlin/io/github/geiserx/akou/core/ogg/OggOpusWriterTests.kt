@@ -138,13 +138,14 @@ class OggOpusWriterTests {
 
     /**
      * The Swift test of the same name: PROTOCOL.md caps a frame at 64 KB and each page goes out as
-     * one frame. The writer's own budget is about 650 bytes a page, so 30 s of audio must stay under
+     * one frame. Ogg's own page limit is not that guarantee (see testNoWrittenPageExceedsTheFrameLimit:
+     * the largest page Ogg can carry is over 64000 bytes). The writer's budget is about 650 bytes a
+     * page, so 30 s of audio must stay under
      * 2 KB a page; a change to packets per page that grows the pages shows up here. The fixture's
      * packets are replayed in a loop (they are real 24 kbit/s libopus packets).
      */
     @Test
     fun testNoPageIsLargerThanAWebSocketFrame() {
-        assertTrue(27 + 255 + 255 * 255 <= 64 * 1024, "a lacing table past 255 entries is refused, so no page can pass the frame")
         val limit = 2 * 1024
         val fixture = FixtureOpusEncoder.fixturePackets()
         val writer = OggOpusWriter(FixtureOpusEncoder(List(50 * 30 + 1) { fixture[it % fixture.size] }), 7u)
