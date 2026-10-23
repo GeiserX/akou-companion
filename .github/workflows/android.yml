@@ -43,7 +43,10 @@ jobs:
         if: steps.changes.outputs.android == 'true'
         with:
           distribution: temurin
-          java-version: '17'
+          # 21 runs the :core tests (see android/core/build.gradle.kts); 17, listed last, stays JAVA_HOME.
+          java-version: |
+            21
+            17
 
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         if: steps.changes.outputs.android == 'true'
@@ -70,7 +73,7 @@ jobs:
         working-directory: android
         run: |
           set -o pipefail
-          ./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug 2>&1 | tee "$RUNNER_TEMP/gradle.log"
+          ./gradlew --no-daemon -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64 :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug 2>&1 | tee "$RUNNER_TEMP/gradle.log"
           if grep -q "Executed 0 tests" "$RUNNER_TEMP/gradle.log"; then
             echo "::error::A test task ran no tests."
             exit 1

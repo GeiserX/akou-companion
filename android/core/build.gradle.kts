@@ -32,6 +32,13 @@ tasks.test {
     environment("PATH", System.getenv("PATH") ?: "")
 }
 
+// The code targets 17, but the tests run on 21. java.text.BreakIterator counts extended grapheme
+// clusters (emoji ZWJ sequences, flags, skin tones) only from JDK 20 on, as Android's ICU-backed one
+// does; on 17 it splits them, and TranscriptDigest's tests would test a JVM the app never runs on.
+tasks.test {
+    javaLauncher.set(javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+}
+
 // CI fails the job on "Executed 0 tests", so the count is printed once per run.
 tasks.test {
     addTestListener(object : TestListener {
