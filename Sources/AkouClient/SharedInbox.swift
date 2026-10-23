@@ -85,7 +85,7 @@ public enum SharedInbox {
         let ext = Self.fileExtension(
             [file.pathExtension, (named as NSString).pathExtension, UTType(typeIdentifier)?.preferredFilenameExtension ?? ""]
         )
-        var title = (named as NSString).deletingPathExtension.trimmingCharacters(in: .whitespacesAndNewlines)
+        var title = Self.title((named as NSString).deletingPathExtension)
         if title.isEmpty { title = "Shared audio" }
         let sidecar = Sidecar(
             id: id.uuidString, title: title, typeIdentifier: typeIdentifier, fileExtension: ext,
@@ -103,9 +103,13 @@ public enum SharedInbox {
     /// Moves every shared file in `inbox` into `folder` (a path relative to the queue's audio
     /// directory) and queues it, for its sidecar's server or else `defaultServer`. A sidecar is
     /// deleted only once its recording is in the queue, so a pass cut short is finished by the
-    /// next one, and a second pass over the same files queues nothing twice. Returns what it queued.
+    /// next one, and a second pass over the same files queues nothing twice. A file with no
+    /// sidecar older than `orphanAge` (an extension killed between its copy and its sidecar) is
+    /// deleted, since nothing would ever send it. Returns what it queued.
     @discardableResult
-    public static func importPending(from inbox: URL, into queue: UploadQueue, folder: String, defaultServer: UUID?) async throws -> [UploadQueue.Item] {
+    public static func importPending(
+        from inbox: URL, into queue: UploadQueue, folder: String, defaultServer: UUID?, now: Date = Date()
+    ) async throws -> [UploadQueue.Item] {
         let fm = FileManager.default
         let files = (try? fm.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil)) ?? []
         let decoder = JSONDecoder()
@@ -138,7 +142,43 @@ public enum SharedInbox {
             try? fm.removeItem(at: sidecarURL)
             queued.append(item)
         }
+        sweepOrphans(in: inbox, now: now)
         return queued
+    }
+
+    /// How long a file may wait in the inbox without its sidecar. The extension writes the
+    /// sidecar a moment after the copy, so a file this old without one never gets it.
+    static let orphanAge: TimeInterval = 10 * 60
+
+    /// Deletes every file in `inbox` that is not a sidecar, has no `<stem>.json` beside it and
+    /// was last written more than `orphanAge` before `now`.
+    static func sweepOrphans(in inbox: URL, now: Date) {
+        let fm = FileManager.default
+        let files = (try? fm.contentsOfDirectory(at: inbox, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        for url in files where url.pathExtension != "json" {
+            let sidecar = url.deletingPathExtension().appendingPathExtension("json")
+            guard !fm.fileExists(atPath: sidecar.path),
+                  let written = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+                  now.timeIntervalSince(written) > orphanAge else { continue }
+            try? fm.removeItem(at: url)
+        }
+    }
+
+    /// The longest title the server takes, in UTF-16 code units as it counts them.
+    static let maxTitleLength = 200
+
+    /// `raw` as a title the server accepts: control characters become spaces, runs of white space
+    /// one space, trimmed, and cut to `maxTitleLength` without splitting a character. The server
+    /// answers any other title with a 422 that a retry only repeats.
+    static func title(_ raw: String) -> String {
+        let scalars = raw.unicodeScalars.map { $0.properties.generalCategory == .control ? " " : Character($0) }
+        let words = String(scalars).split(whereSeparator: { $0.isWhitespace })
+        var title = ""
+        for c in words.joined(separator: " ") {
+            if title.utf16.count + c.utf16.count > maxTitleLength { break }
+            title.append(c)
+        }
+        return title.trimmingCharacters(in: .whitespaces)
     }
 
     /// The first usable extension of `candidates`, lower case: letters and digits only, at most
