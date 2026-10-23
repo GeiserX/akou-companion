@@ -74,12 +74,16 @@ jobs:
         working-directory: android
         run: |
           set -o pipefail
-          ./gradlew --no-daemon -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64 :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :opus:assemble :opus:assembleDebugAndroidTest 2>&1 | tee "$RUNNER_TEMP/gradle.log"
+          ./gradlew --no-daemon -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64 :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest :opus:assemble :opus:assembleDebugAndroidTest 2>&1 | tee "$RUNNER_TEMP/gradle.log"
           if grep -q "Executed 0 tests" "$RUNNER_TEMP/gradle.log"; then
             echo "::error::A test task ran no tests."
             exit 1
           fi
           if ! ls core/build/test-results/test/TEST-*.xml >/dev/null 2>&1; then
             echo "::error::No :core test results were written."
+            exit 1
+          fi
+          if ! ls app/build/test-results/testDebugUnitTest/TEST-*.xml >/dev/null 2>&1; then
+            echo "::error::No :app test results were written."
             exit 1
           fi

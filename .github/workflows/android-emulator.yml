@@ -1,7 +1,8 @@
 name: Android emulator
 
 # The instrumented tests: libopus through :opus on an x86_64 emulator, then ffprobe on the stream the
-# round-trip test hands back. Not a required check until it has proved stable (docs/ANDROID.md, section 6).
+# round-trip test hands back; and :app's real AudioRecord path into an Ogg Opus file, plus the
+# Keystore. Not a required check until it has proved stable (docs/ANDROID.md, section 6).
 on:
   push:
     branches: [main]
@@ -13,6 +14,7 @@ on:
   pull_request:
     paths:
       - 'android/opus/**'
+      - 'android/app/**'
       - 'Sources/COpusShim/**'
       - '.github/workflows/android-emulator.yml'
   workflow_dispatch:
@@ -65,7 +67,7 @@ jobs:
       # Built before the emulator starts, so the emulator's time is spent on tests only.
       - name: Build the test APK
         working-directory: android
-        run: ./gradlew --no-daemon :opus:assembleDebugAndroidTest
+        run: ./gradlew --no-daemon :opus:assembleDebugAndroidTest :app:assembleDebug :app:assembleDebugAndroidTest
 
       - name: Instrumented tests
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
@@ -76,15 +78,17 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           working-directory: android
-          script: ./gradlew --no-daemon :opus:connectedDebugAndroidTest
+          script: ./gradlew --no-daemon :opus:connectedDebugAndroidTest :app:connectedDebugAndroidTest
 
       # connectedDebugAndroidTest is finalized by ffprobeEncodedStream; this guard catches a run where
       # the device ran no tests at all.
       - name: Check the tests ran
         working-directory: android
         run: |
-          if ! grep -qE 'tests="[1-9]' opus/build/outputs/androidTest-results/connected/debug/*.xml 2>/dev/null; then
-            echo "::error::No instrumented test results were written."
-            exit 1
-          fi
-          grep -ho 'tests="[0-9]*" failures="[0-9]*"' opus/build/outputs/androidTest-results/connected/debug/*.xml
+          for m in opus app; do
+            if ! grep -qE 'tests="[1-9]' $m/build/outputs/androidTest-results/connected/debug/*.xml 2>/dev/null; then
+              echo "::error::No :$m instrumented test results were written."
+              exit 1
+            fi
+            grep -ho 'tests="[0-9]*" failures="[0-9]*"' $m/build/outputs/androidTest-results/connected/debug/*.xml
+          done
