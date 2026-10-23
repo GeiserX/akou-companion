@@ -115,4 +115,31 @@ final class JobsClientTests: XCTestCase {
         let cleartext = JobsClient(baseURL: URL(string: "http://akou.example.com")!, key: "ak_test")
         XCTAssertThrowsError(try cleartext.jobRequest("j1"))
     }
+
+    func testAnIdIsOneEscapedPathSegmentInEveryRoute() async throws {
+        let odd = "a/b?c#d e%f"
+        let escaped = "a%2Fb%3Fc%23d%20e%25f"
+        let c = client()
+        let get = try XCTUnwrap(try c.jobRequest(odd).url)
+        XCTAssertEqual(get.absoluteString, "https://akou.example.com/v1/jobs/\(escaped)")
+        XCTAssertNil(get.query, "a ? in the id never starts a query")
+        XCTAssertNil(get.fragment, "a # in the id never starts a fragment")
+        let segments = get.path(percentEncoded: true).split(separator: "/")
+        XCTAssertEqual(segments.count, 3, "the id stays one segment")
+        XCTAssertEqual(segments.last.flatMap { String($0).removingPercentEncoding }, odd)
+        XCTAssertEqual(try c.audioRequest(odd).url?.path(percentEncoded: true), "/v1/jobs/\(escaped)/audio")
+        XCTAssertEqual(JobsClient.audioPath(odd), "/v1/jobs/\(escaped)/audio")
+
+        _ = try? await c.result(odd)
+        _ = try? await c.rename(odd, title: "x")
+        _ = try? await c.delete(odd)
+        let seen = FakeAkouHTTP.seen.suffix(3)
+        XCTAssertEqual(seen.map(\.method), ["GET", "PATCH", "DELETE"])
+        XCTAssertEqual(seen.map(\.rawPath), ["/v1/jobs/\(escaped)/result", "/v1/jobs/\(escaped)", "/v1/jobs/\(escaped)"])
+
+        // An ordinary id is untouched.
+        XCTAssertEqual(try c.jobRequest("job_01JX-a.b~c").url?.absoluteString, "https://akou.example.com/v1/jobs/job_01JX-a.b~c")
+        XCTAssertEqual(Endpoint.segment(".."), "_")
+        XCTAssertEqual(Endpoint.segment(""), "_")
+    }
 }

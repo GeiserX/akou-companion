@@ -104,6 +104,9 @@ final class OggOpusWriterTests: XCTestCase {
         XCTAssertEqual(enc.bitrate, 24000)
         XCTAssertGreaterThan(enc.lookahead, 0)
         XCTAssertEqual(Int(enc.preSkip48k), enc.lookahead * 3)
+        // The value the server trims by, pinned: libopus's lookahead for this 16 kHz mono VOIP
+        // encoder, in 48 kHz samples. A libopus or settings change that moves it shows up here.
+        XCTAssertEqual(enc.preSkip48k, 312)
         XCTAssertThrowsError(try enc.encode([Float](repeating: 0, count: 319)))
     }
 
@@ -127,6 +130,22 @@ final class OggOpusWriterTests: XCTestCase {
         // About 24 kbit/s: 60 bytes per 20 ms packet, with room for VBR.
         let audioBytes = pages[2...6].flatMap(\.packets).reduce(0) { $0 + $1.count }
         XCTAssertTrue((1500...6000).contains(audioBytes), "audio bytes \(audioBytes)")
+    }
+
+    func testNoPageIsLargerThanAWebSocketFrame() throws {
+        // docs/PROTOCOL.md: a frame is at most 64 KB, and each page goes out as one frame.
+        let limit = 64 * 1024
+        var writer = OggOpusWriter(encoder: try OpusEncoder(), serial: 7)
+        var pages = try writer.headerPages()
+        for n in 0..<(50 * 30) { // 30 seconds
+            if let page = try writer.append(frame: Self.sine(frame: n)) { pages.append(page) }
+        }
+        pages.append(try writer.finish())
+        XCTAssertEqual(pages.count, 2 + 150 + 1)
+        for (i, page) in pages.enumerated() {
+            XCTAssertLessThanOrEqual(page.count, limit, "page \(i) is \(page.count) bytes")
+        }
+        XCTAssertEqual(try OggPage.readAll(pages.reduce(Data(), +)).count, pages.count)
     }
 
     func testHeaderPagesAreTheSameBytesEveryCall() throws {

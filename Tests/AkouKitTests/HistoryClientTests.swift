@@ -298,8 +298,9 @@ final class HistoryClientTests: XCTestCase {
 
     func testAnIdNeverAddsAPathSegment() async throws {
         _ = try? await client().call("../keys")
-        XCTAssertEqual(FakeHistoryHTTP.seen.last?.url?.path, "/v1/calls/..keys")
-        XCTAssertEqual(HistoryClient.callAudioPath("a/b", part: 1), "/v1/calls/ab/audio/1")
+        XCTAssertEqual(FakeHistoryHTTP.seen.last?.url?.path(percentEncoded: true), "/v1/calls/..%2Fkeys")
+        XCTAssertEqual(HistoryClient.callAudioPath("a/b", part: 1), "/v1/calls/a%2Fb/audio/1")
+        XCTAssertEqual(HistoryClient.dictationAudioPath(".."), "/v1/dictations/_/audio")
     }
 
     func testTheKeyIsNeverInAnAudioURL() throws {

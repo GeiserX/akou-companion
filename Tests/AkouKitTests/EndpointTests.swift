@@ -10,6 +10,13 @@ final class EndpointTests: XCTestCase {
         XCTAssertEqual(try Endpoint.api(URL(string: "https://example.com:8443")!, "/v1/server").absoluteString, "https://example.com:8443/v1/server")
     }
 
+    func testAnEncodedPathPassesAndAPlainOneIsEncodedNotTrappedOn() throws {
+        let base = URL(string: "https://example.com/akou/")!
+        XCTAssertEqual(try Endpoint.api(base, "/v1/jobs/a%2Fb").absoluteString, "https://example.com/akou/v1/jobs/a%2Fb")
+        XCTAssertEqual(try Endpoint.api(base, "/v1/jobs/a b%").absoluteString, "https://example.com/akou/v1/jobs/a%20b%25")
+        XCTAssertEqual(try Endpoint.api(base, "/v1/jobs/x?y#z").path(percentEncoded: true), "/akou/v1/jobs/x%3Fy%23z")
+    }
+
     func testPlainHttpOnlyToPrivateAddresses() throws {
         XCTAssertEqual(try Endpoint.live(URL(string: "http://192.168.1.20:8787")!).absoluteString, "ws://192.168.1.20:8787/v1/live")
         for ok in ["127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.0.1", "100.64.0.1", "100.127.255.254", "::1", "fd7a:115c:a1e0::1"] {
