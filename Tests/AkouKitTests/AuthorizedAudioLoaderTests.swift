@@ -298,6 +298,10 @@ final class AuthorizedAudioLoaderTests: XCTestCase {
         XCTAssertNil(AuthorizedAudioLoader.path(in: URL(string: "akou-audio://evil/v1/jobs/j/audio")!))
         XCTAssertNil(AuthorizedAudioLoader.path(in: URL(string: "akou-audio://akou/settings")!))
         XCTAssertNil(AuthorizedAudioLoader.path(in: URL(string: "akou-audio://akou/v1/../admin")!))
+        XCTAssertNil(AuthorizedAudioLoader.path(in: URL(string: "akou-audio://akou/v1/jobs/%2F..%2F/audio")!))
+        XCTAssertNil(AuthorizedAudioLoader.path(in: URL(string: "akou-audio://akou/v1/jobs/..%2Fadmin/audio")!))
+        // An id with an escaped slash but no dot segment is still an ordinary id.
+        XCTAssertEqual(AuthorizedAudioLoader.path(in: AuthorizedAudioLoader.url(jobId: "a/b")), "/v1/jobs/a%2Fb/audio")
         XCTAssertNil(AuthorizedAudioLoader.path(in: URL(string: "https://akou/v1/jobs/j/audio")!))
     }
 

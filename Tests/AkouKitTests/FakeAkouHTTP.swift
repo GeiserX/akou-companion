@@ -28,6 +28,8 @@ final class FakeAkouHTTP: URLProtocol, @unchecked Sendable {
         var fileName: String?
         var fileContentType: String?
         var fileBytes: Data?
+        /// The path as sent, still percent-encoded.
+        var rawPath = ""
     }
 
     struct StoredJob {
@@ -73,6 +75,7 @@ final class FakeAkouHTTP: URLProtocol, @unchecked Sendable {
         for (k, v) in request.allHTTPHeaderFields ?? [:] { headers[k.lowercased()] = v }
         let body = Self.body(of: request)
         var seen = Seen(method: method, host: url.host, path: url.path, query: url.query, headers: headers, fields: [:])
+        seen.rawPath = url.path(percentEncoded: true)
         if let type = headers["content-type"], type.hasPrefix("multipart/form-data"),
            let boundary = type.components(separatedBy: "boundary=").last {
             let parts = Self.parts(body, boundary: boundary)

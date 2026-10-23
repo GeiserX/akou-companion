@@ -122,14 +122,14 @@ public struct JobsClient: Sendable {
     /// The request behind `job(_:wait:)`, for a caller with its own transport.
     public func jobRequest(_ id: String, wait: Int = 0) throws -> URLRequest {
         let w = max(0, min(60, wait))
-        var req = try request("GET", "/v1/jobs/\(id)", query: w > 0 ? [URLQueryItem(name: "wait", value: String(w))] : [])
+        var req = try request("GET", "/v1/jobs/\(Endpoint.segment(id))", query: w > 0 ? [URLQueryItem(name: "wait", value: String(w))] : [])
         req.timeoutInterval = max(req.timeoutInterval, TimeInterval(w) + 30)
         return req
     }
 
     /// `GET /v1/jobs/{id}/result?format=json`: 409 `not_done` until the job is done.
     public func result(_ id: String) async throws -> JobResult {
-        try await send(try request("GET", "/v1/jobs/\(id)/result", query: [URLQueryItem(name: "format", value: "json")]))
+        try await send(try request("GET", "/v1/jobs/\(Endpoint.segment(id))/result", query: [URLQueryItem(name: "format", value: "json")]))
     }
 
     /// `GET /v1/jobs`: the key's jobs, newest first. Pass the page's `cursor` back for the next one.
@@ -144,7 +144,7 @@ public struct JobsClient: Sendable {
 
     /// `PATCH /v1/jobs/{id}` `{title}`.
     public func rename(_ id: String, title: String) async throws -> Job {
-        var req = try request("PATCH", "/v1/jobs/\(id)")
+        var req = try request("PATCH", "/v1/jobs/\(Endpoint.segment(id))")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONEncoder().encode(["title": title])
         return try await send(req)
@@ -154,7 +154,7 @@ public struct JobsClient: Sendable {
     /// akou refuses every request but GET and HEAD without `Content-Type: application/json`
     /// (415 `json_required`), even one with no body.
     public func delete(_ id: String) async throws {
-        var req = try request("DELETE", "/v1/jobs/\(id)")
+        var req = try request("DELETE", "/v1/jobs/\(Endpoint.segment(id))")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let (body, response) = try await session.data(for: req)
         let http = response as? HTTPURLResponse
@@ -171,7 +171,7 @@ public struct JobsClient: Sendable {
     }
 
     /// The path of a job's kept audio.
-    public static func audioPath(_ id: String) -> String { "/v1/jobs/\(HistoryClient.segment(id))/audio" }
+    public static func audioPath(_ id: String) -> String { "/v1/jobs/\(Endpoint.segment(id))/audio" }
 
     /// A plain `GET` for any audio path on this server, the key in the header and never in the URL.
     public func audioRequest(path: String) throws -> URLRequest {

@@ -35,31 +35,31 @@ public struct HistoryClient: Sendable {
 
     /// `GET /v1/calls/{id}`.
     public func call(_ id: String) async throws -> CallDetail {
-        try await get("/v1/calls/\(Self.segment(id))")
+        try await get("/v1/calls/\(Endpoint.segment(id))")
     }
 
     /// `GET /v1/calls/{id}/transcript`: every line, the final pass where it ran and the live lines
     /// elsewhere (`layer=best`), without waiting for a second pass (`review=skip`).
     public func transcript(_ id: String) async throws -> CallTranscript {
-        try await get("/v1/calls/\(Self.segment(id))/transcript", [
+        try await get("/v1/calls/\(Endpoint.segment(id))/transcript", [
             .init(name: "layer", value: "best"), .init(name: "format", value: "json"), .init(name: "review", value: "skip"),
         ])
     }
 
     /// `GET /v1/calls/{id}/enhanced`: the latest summary, or nil when the call has none.
     public func summary(_ id: String) async throws -> CallEnhanced.Notes? {
-        let e: CallEnhanced = try await get("/v1/calls/\(Self.segment(id))/enhanced")
+        let e: CallEnhanced = try await get("/v1/calls/\(Endpoint.segment(id))/enhanced")
         return e.enhanced
     }
 
     /// `GET /v1/calls/{id}/notes`: the notepad lines.
     public func notes(_ id: String) async throws -> [CallNote] {
-        let n: CallNotes = try await get("/v1/calls/\(Self.segment(id))/notes")
+        let n: CallNotes = try await get("/v1/calls/\(Endpoint.segment(id))/notes")
         return n.notes
     }
 
     /// The path of one part's audio, Ogg Opus, served with `Range`.
-    public static func callAudioPath(_ id: String, part: Int) -> String { "/v1/calls/\(segment(id))/audio/\(part)" }
+    public static func callAudioPath(_ id: String, part: Int) -> String { "/v1/calls/\(Endpoint.segment(id))/audio/\(part)" }
 
     // MARK: - Dictations
 
@@ -72,12 +72,12 @@ public struct HistoryClient: Sendable {
 
     /// `GET /v1/dictations/{id}`.
     public func dictation(_ id: String) async throws -> Dictation {
-        try await get("/v1/dictations/\(Self.segment(id))")
+        try await get("/v1/dictations/\(Endpoint.segment(id))")
     }
 
     /// The path of a dictation's audio: Ogg Opus (a WAV for one kept before akou kept Opus), served
     /// whole, without `Range`; 404 `no_audio` when none was kept.
-    public static func dictationAudioPath(_ id: String) -> String { "/v1/dictations/\(segment(id))/audio" }
+    public static func dictationAudioPath(_ id: String) -> String { "/v1/dictations/\(Endpoint.segment(id))/audio" }
 
     // MARK: - Jobs
 
@@ -97,13 +97,6 @@ public struct HistoryClient: Sendable {
     }
 
     // MARK: - Plumbing
-
-    /// An id as one path segment. akou's ids never hold a `/`; one that did could add a segment, so
-    /// it is dropped. `Endpoint` percent-encodes the rest (a `?` or `#` never starts a query).
-    static func segment(_ id: String) -> String {
-        let s = id.replacingOccurrences(of: "/", with: "")
-        return s == "." || s == ".." || s.isEmpty ? "_" : s
-    }
 
     static func request(_ base: URL, key: String, _ method: String, _ path: String, query: [URLQueryItem] = [], accept: String) throws -> URLRequest {
         var url = try Endpoint.api(base, path)
