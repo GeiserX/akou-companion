@@ -20,10 +20,16 @@ public struct JobsClient: Sendable {
         public var workspace: String?
         /// Always true from the app: the phone deletes its copy only when the server keeps one.
         public var keepAudio: Bool
+        /// The file name and content type of the upload's file part, for audio shared from another
+        /// app (`<id>.m4a`, `audio/mp4`). Nil for the app's own recordings, which go up as
+        /// `<id>.opus`, `audio/ogg`; an item queued before these existed decodes with nil.
+        public var audioFileName: String?
+        public var audioContentType: String?
 
         public init(
             recordingID: String, title: String? = nil, language: String? = nil, model: String? = nil,
-            preset: String? = nil, workspace: String? = nil, keepAudio: Bool = true
+            preset: String? = nil, workspace: String? = nil, keepAudio: Bool = true,
+            audioFileName: String? = nil, audioContentType: String? = nil
         ) {
             self.recordingID = recordingID
             self.title = title
@@ -32,7 +38,14 @@ public struct JobsClient: Sendable {
             self.preset = preset
             self.workspace = workspace
             self.keepAudio = keepAudio
+            self.audioFileName = audioFileName
+            self.audioContentType = audioContentType
         }
+
+        /// The file part's name: `<id>.opus` unless the audio came with its own.
+        public var uploadFileName: String { audioFileName ?? "\(recordingID).opus" }
+        /// The file part's content type: `audio/ogg` unless the audio came with its own.
+        public var uploadContentType: String { audioContentType ?? "audio/ogg" }
 
         var metadata: CompanionMetadata { CompanionMetadata(recordingID: recordingID, workspace: workspace) }
     }
@@ -76,7 +89,7 @@ public struct JobsClient: Sendable {
         fields.append(("metadata", String(decoding: meta, as: UTF8.self)))
         let boundary = try Multipart.write(
             fields: fields,
-            file: .init(name: "file", fileName: "\(s.recordingID).opus", contentType: "audio/ogg", url: audio),
+            file: .init(name: "file", fileName: s.uploadFileName, contentType: s.uploadContentType, url: audio),
             to: bodyFile
         )
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")

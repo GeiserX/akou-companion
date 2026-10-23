@@ -1,0 +1,8 @@
+#include "Base.xcconfig"
+
+PRODUCT_NAME = AkouCompanionShare
+PRODUCT_BUNDLE_IDENTIFIER = $(BUNDLE_ID_BASE).share
+INFOPLIST_FILE = ShareExtension/Info.plist
+SKIP_INSTALL = YES
+// The App Group the share extension drops audio into, for the app to queue.
+CODE_SIGN_ENTITLEMENTS = Config/Share.entitlements

@@ -32,6 +32,7 @@ final class BackgroundUploader: NSObject {
     private var wake: Task<Void, Never>?
     private var pumping = false
     private var pumpAgain = false
+    private var importing = false
     private var backgroundCompletion: (() -> Void)?
 
     /// Opens the queue and the background session, and sends whatever is due. Safe to call often.
@@ -63,9 +64,40 @@ final class BackgroundUploader: NSObject {
         monitor.start(queue: DispatchQueue(label: "akou-companion.network"))
         self.monitor = monitor
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
-            Task { @MainActor in await BackgroundUploader.shared.pump() }
+            Task { @MainActor in
+                await BackgroundUploader.shared.importShared()
+                await BackgroundUploader.shared.pump()
+            }
         }
-        Task { await reconcile() }
+        Task {
+            await importShared()
+            await reconcile()
+        }
+    }
+
+    /// Queues the audio other apps shared to akou (`SharedInbox`, written by the share extension)
+    /// for "Record to", moved next to the app's own recordings. Nothing without the App Group,
+    /// as in a build with no signing. While the demo is "Record to" they stay in the inbox: the
+    /// demo takes no uploads.
+    func importShared() async {
+        let recordTo = ServerSettings.book.recordTo
+        guard !importing, !DemoMode.isDemo(recordTo), let queue, let container = AppGroup.container else { return }
+        importing = true
+        defer { importing = false }
+        let recordings = Self.support.appending(path: "Recordings", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: recordings, withIntermediateDirectories: true)
+        let queued = (try? await SharedInbox.importPending(
+            from: SharedInbox.directory(in: container), into: queue,
+            folder: Self.relative(recordings), defaultServer: recordTo
+        )) ?? []
+        if !queued.isEmpty { await LibraryStore.shared.loadWaiting() }
+    }
+
+    /// A path inside the app's container, relative to it.
+    private static func relative(_ url: URL) -> String {
+        let path = url.resolvingSymlinksInPath().path
+        let prefix = home.path.hasSuffix("/") ? home.path : home.path + "/"
+        return path.hasPrefix(prefix) ? String(path.dropFirst(prefix.count)) : url.lastPathComponent
     }
 
     /// Queues a finished recording for `serverID`, under the workspace and language it was
@@ -73,9 +105,7 @@ final class BackgroundUploader: NSObject {
     func enqueue(recordingID: String, file: URL, title: String?, workspace: String?, language: String, serverID: UUID?) async {
         start()
         guard let queue else { return }
-        let path = file.resolvingSymlinksInPath().path
-        let prefix = Self.home.path.hasSuffix("/") ? Self.home.path : Self.home.path + "/"
-        let relative = path.hasPrefix(prefix) ? String(path.dropFirst(prefix.count)) : file.lastPathComponent
+        let relative = Self.relative(file)
         let submission = JobsClient.Submission(
             recordingID: recordingID,
             title: title,

@@ -23,6 +23,8 @@ targets:
         product: AkouKit
       - target: AkouCompanionWidgets
         embed: true
+      - target: AkouCompanionShare
+        embed: true
   # The Live Activity, the record control for the Action button, the Lock Screen and Control Center,
   # and the recent-recordings widget. Shared/ is in both targets: a control only offers an intent
   # that the app and the extension both contain. Each target has its own RecordIntentHost.
@@ -35,6 +37,19 @@ targets:
     configFiles:
       Debug: Config/Widgets.xcconfig
       Release: Config/Widgets.xcconfig
+    dependencies:
+      - package: AkouKit
+        product: AkouKit
+  # The share sheet's "akou": copies audio from another app into the App Group for the app to
+  # queue. Like the widgets it holds no key and makes no request (ShareKeyBoundaryTests).
+  AkouCompanionShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - ShareExtension
+    configFiles:
+      Debug: Config/Share.xcconfig
+      Release: Config/Share.xcconfig
     dependencies:
       - package: AkouKit
         product: AkouKit
@@ -64,6 +79,7 @@ schemes:
       targets:
         AkouCompanion: all
         AkouCompanionWidgets: all
+        AkouCompanionShare: all
     test:
       targets:
         - AkouCompanionTests
