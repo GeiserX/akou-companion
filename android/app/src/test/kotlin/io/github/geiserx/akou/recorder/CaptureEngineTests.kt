@@ -75,12 +75,17 @@ class CaptureEngineTests {
     @Volatile private var canOpen = true
     private lateinit var engine: CaptureEngine
 
-    private fun makeEngine(attempts: Int = 3): CaptureEngine = CaptureEngine(
-        open = { events -> if (canOpen) FakeMicrophone(events).also { synchronized(mics) { mics += it } } else null },
+    private val openCalls = AtomicInteger(0)
+
+    private fun makeEngine(attempts: Int = 3, delayMs: Long = 10): CaptureEngine = CaptureEngine(
+        open = { events ->
+            openCalls.incrementAndGet()
+            if (canOpen) FakeMicrophone(events).also { synchronized(mics) { mics += it } } else null
+        },
         sink = { delivered.add(it) },
         post = { main.add(it) },
         rebuildAttempts = attempts,
-        rebuildDelayMs = 10,
+        rebuildDelayMs = delayMs,
     ).also {
         engine = it
         it.onInterruption = { began, resume -> interruptions += began to resume }
@@ -188,6 +193,25 @@ class CaptureEngineTests {
         e.resume()
         mic(1).script.add(320)
         awaitDelivered(640)
+    }
+
+    /** A Pause and Resume while the rebuild waits between tries: Resume's microphone is kept, none leaks. */
+    @Test
+    fun aResumeDuringTheRebuildWaitIsNeverReplaced() {
+        val e = makeEngine(attempts = 3, delayMs = 300)
+        e.start()
+        canOpen = false
+        mic(0).script.add(Microphone.ERROR_DEAD_OBJECT)
+        awaitTrue("a first rebuild try") { openCalls.get() >= 2 }
+        canOpen = true
+        e.pause()
+        e.resume()
+        assertEquals(2, mics.size, "Resume built a microphone")
+        Thread.sleep(700) // past the remaining tries
+        assertEquals(2, mics.size, "the rebuild did not build another over it")
+        assertFalse(mic(1).released)
+        mic(1).script.add(320)
+        awaitDelivered(320)
     }
 
     @Test

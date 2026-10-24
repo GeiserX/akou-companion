@@ -214,7 +214,8 @@ class CaptureEngine(
             if (attempt > 0) Thread.sleep(rebuildDelayMs)
             synchronized(lock) {
                 // A pause or a stop during the wait: Resume builds the microphone when it is wanted.
-                if (stopped || paused) return
+                // A Pause and Resume during the wait already built one: never replace it.
+                if (stopped || paused || mic != null) return
                 val next = openAndStart()
                 if (next != null) {
                     use(next)
