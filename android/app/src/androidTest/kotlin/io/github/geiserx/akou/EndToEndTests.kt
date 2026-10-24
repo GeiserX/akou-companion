@@ -159,7 +159,7 @@ class EndToEndTests {
         // failed connect's queued pages were replayed after the reopen.
         val cut = (offAt - started) / 1000.0..(onAt - started) / 1000.0
         Log.i(TAG, "network off for ${(onAt - offAt) / 1000.0} s, recording seconds $cut")
-        fun coversCut(g: LiveTranscript.Gap) = g.from < cut.start + 5 && g.to >= cut.endInclusive
+        fun coversCut(g: LiveTranscript.Gap) = g.from > cut.start - 5 && g.from < cut.start + 5 && g.to >= cut.endInclusive
         withTimeout(90_000) {
             while (recorder.transcript.value.items.none { it is LiveTranscript.Gap && coversCut(it) }) delay(250)
         }

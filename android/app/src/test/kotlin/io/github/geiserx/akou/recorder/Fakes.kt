@@ -48,6 +48,9 @@ class FakeSource(
     private val samplesOnStart: Int = 0,
     private val failStart: Boolean = false,
 ) : SampleSource {
+    /** When true, [stop] throws, as a microphone that fails to release would. */
+    var failStop = false
+
     override var deliveredSamples = 0L
         private set
 
@@ -64,6 +67,7 @@ class FakeSource(
 
     override fun stop() {
         trace += "capture.stop"
+        if (failStop) throw IllegalStateException("release failed")
     }
 }
 

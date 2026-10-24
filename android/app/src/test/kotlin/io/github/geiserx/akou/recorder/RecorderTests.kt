@@ -100,6 +100,23 @@ class RecorderTests {
         assertEquals(1, finishedCount)
     }
 
+    /** A shutdown step that throws still leaves the recorder idle, so the service ends and a new Start works. */
+    @Test
+    fun aStopThatThrowsLeavesTheRecorderIdle() = runTest {
+        val r = recorder(backgroundScope)
+        var finishedCount = 0
+        r.onFinished = { finishedCount += 1 }
+        r.start(target)
+        source!!.failStop = true
+        assertFailsWith<IllegalStateException> { r.stop() }
+        assertTrue(r.isIdle, "the service may end and the next Start works")
+        assertEquals(0, finishedCount)
+        assertNotNull(r.lastError.value)
+        r.start(target)
+        assertEquals(Recorder.State.Recording(1_000L), r.state.value)
+        r.stop()
+    }
+
     @Test
     fun pagesReachLiveTextAsWrittenToTheFile() = runTest {
         val r = recorder(backgroundScope)
