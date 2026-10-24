@@ -29,10 +29,13 @@
             </intent-filter>
         </activity>
 
+        <!-- stopWithTask false (the default, written out): swiping the app from recents leaves
+             the recording running; the foreground service keeps the process. -->
         <service
             android:name=".recorder.RecordingService"
             android:exported="false"
-            android:foregroundServiceType="microphone" />
+            android:foregroundServiceType="microphone"
+            android:stopWithTask="false" />
     </application>
 
 </manifest>

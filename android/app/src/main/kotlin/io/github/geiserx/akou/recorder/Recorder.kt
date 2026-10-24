@@ -41,7 +41,7 @@ data class FinishedRecording(
 data class TranscriptSnapshot(val items: List<LiveTranscript.Item> = emptyList(), val openLine: LiveTranscript.Line? = null)
 
 /**
- * The one recorder, the port of RecordingController.swift (start and stop; pausing comes in A2).
+ * The one recorder, the port of RecordingController.swift: start, pause, resume and stop.
  * [RecordingService] owns it and runs every call on the main thread, as iOS runs the controller on
  * the main actor.
  *
@@ -63,7 +63,14 @@ class Recorder(
     sealed interface State {
         data object Idle : State
 
+        /**
+         * [startedAt] is shifted by the paused time, so a chronometer drawn from it shows the
+         * audio's length (RecordingController.swift:156).
+         */
         data class Recording(val startedAt: Long) : State
+
+        /** [elapsed] milliseconds were recorded before this pause. */
+        data class Paused(val elapsed: Long) : State
 
         data object Stopping : State
     }
@@ -82,6 +89,9 @@ class Recorder(
      * service up: the stop under way ends it through [onFinished].
      */
     val isIdle: Boolean get() = _state.value == State.Idle && current == null
+
+    /** 16 kHz samples the microphone has delivered to the current recording; 0 with none. */
+    val deliveredSamples: Long get() = current?.source?.deliveredSamples ?: 0L
 
     private val _transcript = MutableStateFlow(TranscriptSnapshot())
     val transcript: StateFlow<TranscriptSnapshot> = _transcript.asStateFlow()
@@ -117,6 +127,14 @@ class Recorder(
     )
 
     private var current: Current? = null
+
+    /**
+     * The current pause came from the system (a phone call, the Assistant, a lost microphone), so
+     * its end may resume the recording. A pause the user asked for never resumes by itself.
+     */
+    @Volatile
+    var pausedBySystem: Boolean = false
+        private set
     private var transcriptModel = LiveTranscript()
 
     /**
@@ -151,7 +169,9 @@ class Recorder(
         transcriptModel = LiveTranscript()
         publishTranscript()
         _lastError.value = null
+        pausedBySystem = false
         _state.value = State.Recording(startedAt)
+        source.onInterruption = { began, shouldResume -> interruption(began, shouldResume) }
 
         if (live != null) {
             _liveState.value = LiveSession.State.Connecting
@@ -163,16 +183,62 @@ class Recorder(
     }
 
     /**
+     * Pauses the recording: no samples, so no pages, for the paused time, and the file stays one
+     * continuous stream (its granules go on from where they were). Live text gets no pages either.
+     * A pause the user asks for; the system's own goes through [interruption].
+     */
+    fun pause() = pause(bySystem = false)
+
+    /** [pausedBySystem] is set before the state, so whoever sees Paused sees whose pause it is. */
+    private fun pause(bySystem: Boolean) {
+        val s = _state.value as? State.Recording ?: return
+        val rec = current ?: return
+        rec.source.pause()
+        pausedBySystem = bySystem
+        _state.value = State.Paused(now() - s.startedAt)
+    }
+
+    /**
+     * Continues a paused recording in the same file. False, with [lastError] set, when the
+     * microphone did not come back: the recording stays paused (and a system pause stays one).
+     */
+    fun resume(): Boolean {
+        val s = _state.value as? State.Paused ?: return false
+        val rec = current ?: return false
+        try {
+            rec.source.resume()
+        } catch (e: Exception) {
+            _lastError.value = "The microphone did not come back: ${e.message ?: e.javaClass.simpleName}"
+            return false
+        }
+        pausedBySystem = false
+        _lastError.value = null
+        _state.value = State.Recording(now() - s.elapsed)
+        return true
+    }
+
+    /** RecordingController.swift:114-124: the system pauses, and only its own pause resumes when it ends. */
+    private fun interruption(began: Boolean, shouldResume: Boolean) {
+        if (began) {
+            if (_state.value is State.Recording) pause(bySystem = true)
+        } else if (pausedBySystem && shouldResume && _state.value is State.Paused) {
+            resume()
+        }
+    }
+
+    /**
      * Stops the recording. The order is RecordingController.swift's: the microphone, the file, the
      * forwarder, live text, then the listener is awaited (never cancelled, so it takes the last
      * words), the transcript closes, and only then is the state idle and [onFinished] called.
      */
     suspend fun stop(): FinishedRecording? {
         val rec = current ?: return null
-        if (_state.value !is State.Recording) return null
+        if (_state.value !is State.Recording && _state.value !is State.Paused) return null
         _state.value = State.Stopping
+        pausedBySystem = false
         val (seconds, error) = try {
             rec.source.stop()
+            rec.source.onInterruption = null
             val finish = rec.output.finish()
             rec.forwarder.join()
             rec.live?.stop()

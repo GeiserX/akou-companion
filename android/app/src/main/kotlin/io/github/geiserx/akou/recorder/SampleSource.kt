@@ -4,10 +4,24 @@ package io.github.geiserx.akou.recorder
 /**
  * What the recorder takes samples from: 16 kHz mono Float, handed to the sink it was made with on a
  * thread of the source's own. The microphone ([AudioCapture]) in the app; a fake in the tests.
+ * Every call, and [onInterruption], happens on the main thread.
  */
 interface SampleSource {
+    /**
+     * The system took the microphone (`began` true: a phone call, the Assistant, a microphone that
+     * could not be rebuilt) or gave it back (`began` false, with whether the source may resume).
+     * The port of AudioCapture.swift's `onInterruption`.
+     */
+    var onInterruption: ((began: Boolean, shouldResume: Boolean) -> Unit)?
+
     /** Starts delivering. Throws when the microphone cannot be opened. */
     fun start()
+
+    /** Stops delivering until [resume]; nothing is delivered for the paused time. */
+    fun pause()
+
+    /** Delivers again, into the same stream. Throws when the microphone does not come back. */
+    fun resume()
 
     /** Stops delivering. When it returns, the sink is not called again. */
     fun stop()
