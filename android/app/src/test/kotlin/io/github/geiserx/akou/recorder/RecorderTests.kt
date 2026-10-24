@@ -6,6 +6,7 @@ import io.github.geiserx.akou.core.client.LiveTranscript
 import io.github.geiserx.akou.core.ogg.OggPage
 import io.github.geiserx.akou.core.protocol.LiveToken
 import io.github.geiserx.akou.core.protocol.LiveWords
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import org.junit.Rule
@@ -72,6 +73,48 @@ class RecorderTests {
         assertEquals(target.id, finished.serverId)
         assertEquals("${finished.id}.opus", finished.file.name)
         assertNull(r.stop(), "a second stop does nothing")
+    }
+
+    /**
+     * The service ends itself after a Stop only when the recorder is idle. A second Stop that lands
+     * while the first is still waiting on live text finds the recorder stopping, not idle, so the
+     * microphone service stays up until onFinished.
+     */
+    @Test
+    fun aSecondStopWhileStoppingDoesNothingAndTheRecorderIsNotIdle() = runTest {
+        val r = recorder(backgroundScope)
+        var finishedCount = 0
+        r.onFinished = { finishedCount += 1 }
+        assertTrue(r.isIdle)
+        r.start(target)
+        assertFalse(r.isIdle)
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        live!!.stopGate = gate
+        val first = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { r.stop() }
+        assertEquals(Recorder.State.Stopping, r.state.value)
+        assertNull(r.stop(), "the second stop has nothing to stop")
+        assertFalse(r.isIdle, "a stop is under way: the service must stay up")
+        gate.complete(Unit)
+        assertNotNull(first.await())
+        assertTrue(r.isIdle)
+        assertEquals(1, finishedCount)
+    }
+
+    /** A shutdown step that throws still leaves the recorder idle, so the service ends and a new Start works. */
+    @Test
+    fun aStopThatThrowsLeavesTheRecorderIdle() = runTest {
+        val r = recorder(backgroundScope)
+        var finishedCount = 0
+        r.onFinished = { finishedCount += 1 }
+        r.start(target)
+        source!!.failStop = true
+        assertFailsWith<IllegalStateException> { r.stop() }
+        assertTrue(r.isIdle, "the service may end and the next Start works")
+        assertEquals(0, finishedCount)
+        assertNotNull(r.lastError.value)
+        r.start(target)
+        assertEquals(Recorder.State.Recording(1_000L), r.state.value)
+        r.stop()
     }
 
     @Test

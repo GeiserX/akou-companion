@@ -11,10 +11,14 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import java.io.File
 
 /** An encoder that needs no libopus: three bytes per frame, lookahead 104 (pre-skip 312). */
-class FakeEncoder : OpusEncoder {
+class FakeEncoder : OpusEncoder, AutoCloseable {
     var frames = 0
     var closed = false
     override val lookahead: Int = 104
+
+    override fun close() {
+        closed = true
+    }
 
     override fun encode(frame: FloatArray): ByteArray {
         require(frame.size == OpusEncoder.FRAME_SAMPLES)
@@ -44,6 +48,9 @@ class FakeSource(
     private val samplesOnStart: Int = 0,
     private val failStart: Boolean = false,
 ) : SampleSource {
+    /** When true, [stop] throws, as a microphone that fails to release would. */
+    var failStop = false
+
     override var deliveredSamples = 0L
         private set
 
@@ -60,6 +67,7 @@ class FakeSource(
 
     override fun stop() {
         trace += "capture.stop"
+        if (failStop) throw IllegalStateException("release failed")
     }
 }
 
@@ -83,7 +91,11 @@ class FakeLive(private val trace: MutableList<String>) : LiveText {
         pages += page to endsAt
     }
 
+    /** When set, [stop] waits for it: a server slow to send its last words. */
+    var stopGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
+
     override suspend fun stop() {
+        stopGate?.await()
         trace += "live.stop(pages=${pages.size})"
         // As LiveSession: the last words come before events ends.
         channel.trySend(LiveSession.Event.StateChanged(LiveSession.State.Off("stopped")))

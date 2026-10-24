@@ -7,10 +7,12 @@ import io.github.geiserx.akou.core.client.LiveTranscript
 import io.github.geiserx.akou.core.protocol.LiveHello
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
@@ -74,6 +76,12 @@ class Recorder(
 
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
+
+    /**
+     * Nothing is recording or stopping. A Stop that finds the recorder busy stopping must leave the
+     * service up: the stop under way ends it through [onFinished].
+     */
+    val isIdle: Boolean get() = _state.value == State.Idle && current == null
 
     private val _transcript = MutableStateFlow(TranscriptSnapshot())
     val transcript: StateFlow<TranscriptSnapshot> = _transcript.asStateFlow()
@@ -163,11 +171,23 @@ class Recorder(
         val rec = current ?: return null
         if (_state.value !is State.Recording) return null
         _state.value = State.Stopping
-        rec.source.stop()
-        val (seconds, error) = rec.output.finish()
-        rec.forwarder.join()
-        rec.live?.stop()
-        rec.listener?.join()
+        val (seconds, error) = try {
+            rec.source.stop()
+            val finish = rec.output.finish()
+            rec.forwarder.join()
+            rec.live?.stop()
+            rec.listener?.join()
+            finish
+        } catch (e: Exception) {
+            // A shutdown step threw: still close the file, then leave Stopping so the service can
+            // end and the next Start works. The caller sees the exception.
+            withContext(NonCancellable) { runCatching { rec.output.finish() } }
+            rec.listener?.cancel()
+            current = null
+            _lastError.value = "Stopping failed: ${e.message ?: e.javaClass.simpleName}"
+            _state.value = State.Idle
+            throw e
+        }
         transcriptModel.close()
         publishTranscript()
         current = null

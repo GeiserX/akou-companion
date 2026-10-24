@@ -71,6 +71,63 @@ final class LiveSessionTests: XCTestCase {
         XCTAssertEqual(log.gaps.first?.to ?? -1, offline.last!.end, accuracy: 1e-9)
     }
 
+    /// A connect that fails slowly: the pages queued while it was connecting never reached a
+    /// server, so the reopened session must not replay them, and its one gap covers the whole hole.
+    func testAFailedConnectDropsItsQueueSoTheGapCoversTheWholeHole() async throws {
+        let server = try FakeLiveServer(behaviours: [.normal], slowFailureMs: 500)
+        defer { server.stop() }
+        let base = try await server.start()
+        server.holdUpgrades = true
+        let pages = try PageMaker(serial: 18)
+        let session = LiveSession(
+            baseURL: base, key: "ak_test", hello: LiveHello(), headerPages: pages.headers,
+            policy: .init(backoff: [.milliseconds(400)]), session: urlSession
+        )
+        let log = EventLog(session.events)
+        await session.start()
+
+        // Handed in while the first attempt is still connecting: they wait in the queue.
+        for _ in 0..<2 {
+            let p = try pages.next()
+            await session.send(page: p.data, endsAt: p.end)
+        }
+        await log.expect { $0.states.contains(.paused(reason: "network")) }
+        server.holdUpgrades = false
+        XCTAssertGreaterThanOrEqual(server.heldUpgrades, 1)
+
+        // Handed in while paused: they stay in the file only.
+        var offline: [PageMaker.Page] = []
+        for _ in 0..<2 {
+            let p = try pages.next()
+            offline.append(p)
+            await session.send(page: p.data, endsAt: p.end)
+        }
+        await log.expect { $0.states.contains(self.fakeEngine) }
+
+        var after: [PageMaker.Page] = []
+        for _ in 0..<2 {
+            let p = try pages.next()
+            after.append(p)
+            await session.send(page: p.data, endsAt: p.end)
+        }
+        await session.stop()
+        await log.expect { $0.finished }
+
+        XCTAssertEqual(log.states, [
+            .connecting, .paused(reason: "network"), .connecting, fakeEngine, .off(reason: "stopped"),
+        ])
+        XCTAssertEqual(server.sessions.count, 1)
+        let hello = FakeLiveServer.Frame.text(try LiveClientMessage.hello(LiveHello()).json())
+        XCTAssertEqual(
+            server.sessions.first,
+            [hello] + pages.headers.map(FakeLiveServer.Frame.binary) + after.map { .binary($0.data) } + [.text(#"{"type":"stop"}"#)],
+            "no page queued during the failed connect goes out"
+        )
+        XCTAssertEqual(log.gaps.count, 1)
+        XCTAssertEqual(log.gaps.first?.from ?? -1, 0, accuracy: 1e-9)
+        XCTAssertEqual(log.gaps.first?.to ?? -1, offline.last!.end, accuracy: 1e-9)
+    }
+
     func testAStalledServerTripsTheQueueCapAndTheReopenSendsNoBacklog() async throws {
         let server = try FakeLiveServer(behaviours: [.stall(afterPages: 0), .normal])
         defer { server.stop() }

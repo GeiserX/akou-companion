@@ -65,8 +65,17 @@ class RecordingFile(override val file: File, private val encoder: OpusEncoder) :
 
     init {
         file.parentFile?.mkdirs()
-        if (!file.createNewFile()) {
+        val created = try {
+            file.createNewFile()
+        } catch (e: IOException) {
             executor.shutdown()
+            (encoder as? AutoCloseable)?.close()
+            throw e
+        }
+        if (!created) {
+            // Someone else's file: never overwritten, never deleted, and the encoder is freed.
+            executor.shutdown()
+            (encoder as? AutoCloseable)?.close()
             throw IOException("could not create ${file.name}")
         }
         var stream: FileOutputStream? = null

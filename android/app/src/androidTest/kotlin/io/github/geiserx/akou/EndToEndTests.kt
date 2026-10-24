@@ -153,10 +153,13 @@ class EndToEndTests {
         delay(30_000)
         for (c in listOf("cmd connectivity airplane-mode disable", "svc wifi enable", "svc data enable")) shell(c)
         val onAt = System.currentTimeMillis()
-        // The cut in the recording's own seconds; the gap marker must cover it, not just exist.
+        // The cut in the recording's own seconds; the gap marker must cover it, not just exist. It
+        // may start a little after the cut (the session sees the cut only when a send fails), but it
+        // must run to the end of it: a marker that stops early hides the hole, as one did when a
+        // failed connect's queued pages were replayed after the reopen.
         val cut = (offAt - started) / 1000.0..(onAt - started) / 1000.0
         Log.i(TAG, "network off for ${(onAt - offAt) / 1000.0} s, recording seconds $cut")
-        fun coversCut(g: LiveTranscript.Gap) = g.from < cut.endInclusive && g.to > cut.start
+        fun coversCut(g: LiveTranscript.Gap) = g.from > cut.start - 5 && g.from < cut.start + 5 && g.to >= cut.endInclusive
         withTimeout(90_000) {
             while (recorder.transcript.value.items.none { it is LiveTranscript.Gap && coversCut(it) }) delay(250)
         }

@@ -49,8 +49,10 @@ class RecordingFileTests {
     @Test
     fun anExistingFileIsNeverOverwritten() {
         val f = File(tmp.root, "b.opus").apply { writeText("x") }
-        assertFailsWith<java.io.IOException> { RecordingFile(f, FakeEncoder()) }
+        val enc = FakeEncoder()
+        assertFailsWith<java.io.IOException> { RecordingFile(f, enc) }
         assertEquals("x", f.readText())
+        assertTrue(enc.closed, "the native encoder is freed when the file cannot be created")
     }
 
     @Test

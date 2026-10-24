@@ -207,6 +207,9 @@ public actor LiveSession {
             drain()
         } catch {
             guard gen == generation else { return }
+            // Pages queued while this attempt was connecting never reached a server: the next session
+            // starts from fresh pages, so its first page reports the whole hole as a gap.
+            queue.removeAll()
             let reason = Self.reason(for: error)
             if Self.retryable.contains(reason) { retry(after: reason) } else { end(reason) }
         }

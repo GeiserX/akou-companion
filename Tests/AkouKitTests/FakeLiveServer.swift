@@ -54,10 +54,24 @@ final class FakeLiveServer: @unchecked Sendable {
         try self.init(key: key, behaviours: [behaviour])
     }
 
-    init(key: String = "ak_test", behaviours: [Behaviour]) throws {
+    /// While true, a new connection gets no answer to its upgrade and is dropped after
+    /// `slowFailureMs`: a connect that fails slowly, as on a network that went away. URLSession may
+    /// retry such a request once by itself; the retry is held the same way, so the client sees one
+    /// failed connect for as long as this stays true.
+    var holdUpgrades: Bool {
+        get { lock.withLock { _holdUpgrades } }
+        set { lock.withLock { _holdUpgrades = newValue } }
+    }
+    var heldUpgrades: Int { lock.withLock { _heldUpgrades } }
+    private var _holdUpgrades = false
+    private var _heldUpgrades = 0
+    let slowFailureMs: Int
+
+    init(key: String = "ak_test", behaviours: [Behaviour], slowFailureMs: Int = 500) throws {
         precondition(!behaviours.isEmpty)
         self.key = key
         self.behaviours = behaviours
+        self.slowFailureMs = slowFailureMs
         let ws = NWProtocolWebSocket.Options()
         ws.autoReplyPing = true
         // The handler must be set before the listener copies the parameters.
@@ -77,6 +91,15 @@ final class FakeLiveServer: @unchecked Sendable {
     func start() async throws -> URL {
         listener.newConnectionHandler = { [weak self] conn in
             guard let self else { return }
+            let hold = self.lock.withLock {
+                if self._holdUpgrades { self._heldUpgrades += 1 }
+                return self._holdUpgrades
+            }
+            if hold {
+                // Never started, so the upgrade is never answered; then the connection goes away.
+                self.queue.asyncAfter(deadline: .now() + .milliseconds(self.slowFailureMs)) { conn.cancel() }
+                return
+            }
             self.lock.withLock { self.connections.append(conn) }
             // Network.framework leaves a refused upgrade open without an answer, so the client
             // would wait for its request timeout; close it the way a server's 401 ends the request.
