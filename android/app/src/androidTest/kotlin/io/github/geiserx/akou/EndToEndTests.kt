@@ -111,7 +111,7 @@ class EndToEndTests {
             makeSource = { sink ->
                 // The loudest sample, so a silenced or unfed microphone shows in the log.
                 val loud: (FloatArray) -> Unit = { s -> for (x in s) if (abs(x) > peak) peak = abs(x); sink(s) }
-                if (pcm == null) AudioCapture(loud) else LoopedPcm(pcm, loud)
+                if (pcm == null) AudioCapture(context, loud) else LoopedPcm(pcm, loud)
             },
             makeLive = { t, headers, hello ->
                 // How far behind the audio each token arrives: now minus the recording's start minus `t`.
@@ -285,6 +285,13 @@ class EndToEndTests {
             running = false
             thread?.join()
         }
+
+        // This test never pauses.
+        override var onInterruption: ((began: Boolean, shouldResume: Boolean) -> Unit)? = null
+
+        override fun pause() = throw UnsupportedOperationException("not paused in this test")
+
+        override fun resume() = throw UnsupportedOperationException("not paused in this test")
     }
 
     private companion object {

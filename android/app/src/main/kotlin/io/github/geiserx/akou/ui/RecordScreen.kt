@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -94,6 +95,7 @@ fun RecordScreen(onSettings: () -> Unit) {
         Text(
             when (s) {
                 is Recorder.State.Recording -> clock(s.startedAt)
+                is Recorder.State.Paused -> "Paused, " + LiveTranscript.clock(s.elapsed / 1000.0)
                 Recorder.State.Stopping -> "Stopping…"
                 Recorder.State.Idle -> "Ready"
             },
@@ -114,13 +116,19 @@ fun RecordScreen(onSettings: () -> Unit) {
                         }
                         if (needed.isEmpty()) RecordingService.start(context) else ask.launch(needed.toTypedArray())
                     }
-                    is Recorder.State.Recording -> RecordingService.stop(context)
+                    is Recorder.State.Recording, is Recorder.State.Paused -> RecordingService.stop(context)
                     Recorder.State.Stopping -> {}
                 }
             },
             enabled = state != Recorder.State.Stopping,
             modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (state is Recorder.State.Recording) "Stop" else "Record") }
+        ) { Text(if (state is Recorder.State.Recording || state is Recorder.State.Paused) "Stop" else "Record") }
+        if (s is Recorder.State.Recording || s is Recorder.State.Paused) {
+            OutlinedButton(
+                onClick = { if (s is Recorder.State.Paused) RecordingService.resume(context) else RecordingService.pause(context) },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(if (s is Recorder.State.Paused) "Resume" else "Pause") }
+        }
 
         listOfNotNull(permissionNote, startError, lastError?.let { "The file reported an error: $it" })
             .forEach { Text(it, color = MaterialTheme.colorScheme.error) }

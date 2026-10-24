@@ -41,7 +41,7 @@ class TracedFile(file: File, private val trace: MutableList<String>) : Recording
     }
 }
 
-/** A sample source that delivers [samplesOnStart] at once and [samplesOnStop] just before it stops. */
+/** A sample source that delivers [samplesOnStart] at once; the test delivers more and interrupts it. */
 class FakeSource(
     private val sink: (FloatArray) -> Unit,
     private val trace: MutableList<String>,
@@ -50,6 +50,14 @@ class FakeSource(
 ) : SampleSource {
     /** When true, [stop] throws, as a microphone that fails to release would. */
     var failStop = false
+
+    /** When true, [resume] throws, as a microphone that does not come back would. */
+    var failResume = false
+
+    var paused = false
+        private set
+
+    override var onInterruption: ((began: Boolean, shouldResume: Boolean) -> Unit)? = null
 
     override var deliveredSamples = 0L
         private set
@@ -60,9 +68,27 @@ class FakeSource(
         if (samplesOnStart > 0) deliver(samplesOnStart)
     }
 
+    /** Samples from the microphone; a paused source delivers none, as AudioCapture. */
     fun deliver(n: Int) {
+        if (paused) return
         deliveredSamples += n
         sink(FloatArray(n))
+    }
+
+    /** The system takes the microphone ([began] true) or gives it back. */
+    fun interrupt(began: Boolean, shouldResume: Boolean = !began) {
+        onInterruption?.invoke(began, shouldResume)
+    }
+
+    override fun pause() {
+        trace += "capture.pause"
+        paused = true
+    }
+
+    override fun resume() {
+        trace += "capture.resume"
+        if (failResume) throw IllegalStateException("still in a call")
+        paused = false
     }
 
     override fun stop() {

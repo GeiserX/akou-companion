@@ -36,7 +36,7 @@ class AudioCaptureTests {
         val rf = RecordingFile(file, LibopusEncoder())
         var calls = 0
         var callThread: Thread? = null
-        val capture = AudioCapture { samples ->
+        val capture = AudioCapture(context) { samples ->
             calls += 1
             callThread = Thread.currentThread()
             rf.append(samples)
