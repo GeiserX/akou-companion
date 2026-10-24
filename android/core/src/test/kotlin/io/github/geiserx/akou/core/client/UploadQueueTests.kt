@@ -63,6 +63,42 @@ class UploadQueueTests {
     private fun job(id: String) = UploadQueue.Answer.Http(202, Headers.headersOf(), """{"id":"$id","status":"queued","keep_audio":true}""".encodeToByteArray())
 
     @Test
+    fun aTornQueueFileIsSetAsideAndTheQueueStartsEmptyInsteadOfFailing() {
+        val first = makeQueue()
+        record(first, "rec-a")
+        record(first, "rec-b")
+        val file = File(dir, "state/uploads.json")
+        // A power loss mid-write: the file ends halfway through.
+        val whole = file.readBytes()
+        file.writeBytes(whole.copyOf(whole.size / 2))
+
+        val queue = makeQueue()
+        assertTrue(queue.startedFromUnreadableStore)
+        assertEquals(emptyList(), queue.items)
+        assertTrue(File(dir, "state/uploads.json.bad").isFile, "the torn file is kept beside it")
+        assertFalse(file.exists())
+        assertTrue(File(audioDir, "rec-a.opus").exists(), "the recordings stay for the sweep")
+
+        // The queue works from there, and the next start reads it.
+        record(queue, "rec-a")
+        val again = makeQueue()
+        assertFalse(again.startedFromUnreadableStore)
+        assertEquals(listOf("rec-a"), again.items.map { it.recordingId })
+    }
+
+    @Test
+    fun aRemovedItemIsGoneAfterARestartAndItsFileStays() {
+        val queue = makeQueue()
+        val file = record(queue, "rec-r")
+        record(queue, "rec-s")
+        queue.remove("rec-r")
+        queue.remove("rec-missing") // nothing to forget
+        assertNull(queue.item("rec-r"))
+        assertEquals(listOf("rec-s"), makeQueue().items.map { it.recordingId })
+        assertTrue(file.exists())
+    }
+
+    @Test
     fun testAnUploadWhoseAnswerWasLostIsRetriedWithTheSameKeyAndMakesOneJob() {
         val queue = makeQueue()
         val file = record(queue, "rec-1")

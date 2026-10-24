@@ -8,16 +8,17 @@ import android.os.PowerManager
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.work.WorkManager
 import io.github.geiserx.akou.MainActivity
 import io.github.geiserx.akou.core.client.ServerBook
 import io.github.geiserx.akou.core.ogg.OggPage
 import io.github.geiserx.akou.settings.Settings
+import io.github.geiserx.akou.upload.Uploads
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -47,11 +48,26 @@ class RecordingServiceTests {
         shell("wm dismiss-keyguard")
     }
 
+    /** The recording the test made, as the service finished it (and queued it). */
+    @Volatile private var finished: FinishedRecording? = null
+    private var previousOnFinished: ((FinishedRecording) -> Unit)? = null
+
     @After
     fun tearDown() {
         if (!recorder.isIdle) {
             RecordingService.stop(context)
             await("idle after the test") { recorder.isIdle }
+        }
+        previousOnFinished?.let { recorder.onFinished = it }
+        // Leave the installed app's queue and recordings as they were, whether the test passed or not.
+        finished?.let { f ->
+            val id = f.id.toString()
+            WorkManager.getInstance(context).cancelUniqueWork(Uploads.workName(id))
+            Uploads.get(context).run {
+                queue.remove(id)
+                refresh()
+            }
+            f.file.delete()
         }
         shell("input keyevent KEYCODE_WAKEUP")
         shell("wm dismiss-keyguard")
@@ -63,6 +79,13 @@ class RecordingServiceTests {
         // Started from a visible activity, as the Record button does.
         RecordingService.start(context)
         await("recording") { recorder.state.value is Recorder.State.Recording }
+        // The service set its onFinished (queue the recording) when it started; keep it, and see the file.
+        val queueIt = recorder.onFinished
+        previousOnFinished = queueIt
+        recorder.onFinished = { f ->
+            finished = f
+            queueIt(f)
+        }
         val startedAt = (recorder.state.value as Recorder.State.Recording).startedAt
 
         var n = awaitNotification(listOf("Pause", "Stop"))
@@ -114,22 +137,34 @@ class RecordingServiceTests {
         assertTrue(locked >= 16_000, "samples with the screen off: $locked in 3 s")
         assertTrue(recorder.state.value is Recorder.State.Recording)
 
+        // Pause and Resume from the notification with the screen locked. The user's pause stops the
+        // AudioRecord, so this Resume starts the microphone again from the background.
+        action(awaitNotification(listOf("Pause", "Stop")), "Pause").actionIntent.send()
+        await("paused while locked") { recorder.state.value is Recorder.State.Paused }
+        Thread.sleep(300)
+        val atLockedPause = recorder.deliveredSamples
+        Thread.sleep(1_000)
+        assertEquals(atLockedPause, recorder.deliveredSamples, "nothing is captured while paused")
+        action(awaitNotification(listOf("Resume", "Stop")), "Resume").actionIntent.send()
+        await("recording again while locked") { recorder.state.value is Recorder.State.Recording }
+        assertFalse(power.isInteractive, "the screen stayed off")
+        val atLockedResume = recorder.deliveredSamples
+        Thread.sleep(3_000)
+        val resumedLocked = recorder.deliveredSamples - atLockedResume
+        assertTrue(resumedLocked >= 16_000, "samples after a Resume with the screen off: $resumedLocked in 3 s")
+        assertTrue(recorder.state.value is Recorder.State.Recording)
+
         // Stop from the notification, with the screen still off.
-        var finished: FinishedRecording? = null
-        val previous = recorder.onFinished
-        recorder.onFinished = { f -> finished = f; previous(f) }
         action(awaitNotification(listOf("Pause", "Stop")), "Stop").actionIntent.send()
         await("idle") { recorder.isIdle }
         await("the notification is gone") { nm.activeNotifications.none { it.id == RecordingService.NOTIFICATION_ID } }
-        recorder.onFinished = previous
         val f = assertNotNull(finished)
         val pages = OggPage.readAll(f.file.readBytes())
         assertEquals(OggPage.Flags.END_OF_STREAM, pages.last().flags)
         assertEquals((0 until pages.size).map { it.toUInt() }, pages.map { it.sequence })
         // The file holds the time recorded, never the pause.
         val wall = (System.currentTimeMillis() - startedAt) / 1000.0
-        assertTrue(f.seconds < wall - 1.4, "file ${f.seconds} s, ${wall} s since the start")
-        File(f.file.path).delete()
+        assertTrue(f.seconds < wall - 2.4, "file ${f.seconds} s, ${wall} s since the start")
         scenario.close()
     }
 

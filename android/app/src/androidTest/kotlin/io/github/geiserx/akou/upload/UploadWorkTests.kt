@@ -83,8 +83,19 @@ class UploadWorkTests {
         assertTrue(settings.keys.save("ak_work_test", serverId.toString()))
     }
 
+    /** The recording the test queued in the installed app's own queue. */
+    private var queuedId: String? = null
+
     @After
     fun tearDown() {
+        queuedId?.let { id ->
+            WorkManager.getInstance(context).cancelUniqueWork(Uploads.workName(id))
+            Uploads.get(context).run {
+                queue.item(id)?.let { queue.audioFile(it).delete() }
+                queue.remove(id)
+                refresh()
+            }
+        }
         server.close()
         settings.keys.delete(serverId.toString())
         runBlocking {
@@ -111,7 +122,7 @@ class UploadWorkTests {
     @Test
     fun aRecordingMadeOfflineUploadsWhenTheNetworkComesOnceWithTheSameKeyThenItsCopyIsDeleted() {
         val uploads = Uploads.get(context)
-        val id = UUID.randomUUID().toString()
+        val id = UUID.randomUUID().toString().also { queuedId = it }
         val file = File(uploads.queue.audioDirectory, "$id.opus").apply { writeBytes(byteArrayOf(1, 2, 3)) }
         uploads.queue.enqueue(JobsClient.Submission(recordingId = id, language = "auto"), file.name, serverId)
         uploads.schedule(id)

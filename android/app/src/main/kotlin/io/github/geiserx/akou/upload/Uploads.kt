@@ -52,6 +52,9 @@ class Uploads private constructor(context: Context) {
     )
 
     init {
+        if (queue.startedFromUnreadableStore) {
+            Log.w(TAG, "$QUEUE_FILE was unreadable; set aside as $QUEUE_FILE.bad, the sweep queues the recordings again")
+        }
         // This process has just opened the queue and runs no upload yet, so an item left
         // `uploading` was claimed by a process that died; it goes back to pending.
         queue.requeueInterrupted()
