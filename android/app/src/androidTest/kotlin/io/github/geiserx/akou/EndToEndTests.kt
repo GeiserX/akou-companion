@@ -214,9 +214,10 @@ class EndToEndTests {
         val result = jobs.result(jobId)
         val text = result.text
         // The final pass fills the gap: text the live view never showed, timed inside the cut. Words
-        // carry times only on some engines; segments always do.
+        // carry times only on some engines; segments always do. A segment counts only when it lies
+        // wholly inside the cut, so one that merely overlaps it, with its words outside, does not.
         val wordsInCut = result.words.count { w -> w.s != null && w.s!! >= cut.start && w.s!! <= cut.endInclusive }
-        val segmentsInCut = result.segments.filter { it.s < cut.endInclusive && it.e > cut.start && it.text.isNotBlank() }
+        val segmentsInCut = result.segments.filter { it.s >= cut.start && it.e <= cut.endInclusive && it.text.isNotBlank() }
         Log.i(
             TAG,
             "job $jobId done, ${text.split(' ').size} words in the final transcript, ${result.segments.size} segments, " +
