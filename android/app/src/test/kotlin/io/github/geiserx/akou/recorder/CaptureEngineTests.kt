@@ -45,6 +45,11 @@ class FakeMicrophone(val events: Microphone.Events, override val rate: Int = 160
     override fun read(buffer: FloatArray, count: Int): Int {
         while (recording && !released) {
             val n = script.poll(5, TimeUnit.MILLISECONDS) ?: continue
+            if (!recording) {
+                // Stopped while waiting: a stopped AudioRecord records nothing more.
+                script.add(n)
+                return 0
+            }
             if (n < 0) return n
             val k = minOf(n, count)
             buffer.fill(value, 0, k)
@@ -133,8 +138,12 @@ class CaptureEngineTests {
         val e = makeEngine()
         e.start()
         mic(0).events.silenced(true)
+        // What the system writes into a silenced input, before the recorder has paused.
+        mic(0).script.add(320)
         drainMain()
         assertEquals(listOf(true to false), interruptions)
+        Thread.sleep(50)
+        assertEquals(0L, e.deliveredSamples, "silenced samples never reach the file, paused or not")
         // The recorder pauses on that; the microphone stays open so the end can be heard.
         e.pause()
         assertTrue(mic(0).recording, "a pause while silenced keeps the AudioRecord recording")

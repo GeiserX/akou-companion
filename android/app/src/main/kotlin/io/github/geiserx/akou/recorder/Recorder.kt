@@ -132,6 +132,7 @@ class Recorder(
      * The current pause came from the system (a phone call, the Assistant, a lost microphone), so
      * its end may resume the recording. A pause the user asked for never resumes by itself.
      */
+    @Volatile
     var pausedBySystem: Boolean = false
         private set
     private var transcriptModel = LiveTranscript()
@@ -186,11 +187,14 @@ class Recorder(
      * continuous stream (its granules go on from where they were). Live text gets no pages either.
      * A pause the user asks for; the system's own goes through [interruption].
      */
-    fun pause() {
+    fun pause() = pause(bySystem = false)
+
+    /** [pausedBySystem] is set before the state, so whoever sees Paused sees whose pause it is. */
+    private fun pause(bySystem: Boolean) {
         val s = _state.value as? State.Recording ?: return
         val rec = current ?: return
         rec.source.pause()
-        pausedBySystem = false
+        pausedBySystem = bySystem
         _state.value = State.Paused(now() - s.startedAt)
     }
 
@@ -216,10 +220,7 @@ class Recorder(
     /** RecordingController.swift:114-124: the system pauses, and only its own pause resumes when it ends. */
     private fun interruption(began: Boolean, shouldResume: Boolean) {
         if (began) {
-            if (_state.value is State.Recording) {
-                pause()
-                pausedBySystem = true
-            }
+            if (_state.value is State.Recording) pause(bySystem = true)
         } else if (pausedBySystem && shouldResume && _state.value is State.Paused) {
             resume()
         }
