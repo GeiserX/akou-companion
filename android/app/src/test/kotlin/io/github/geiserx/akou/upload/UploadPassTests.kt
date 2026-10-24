@@ -60,6 +60,24 @@ class UploadPassTests {
     }
 
     @Test
+    fun theLogNamesEachRequestWithItsIdempotencyKeyAndOnlyTheStatusOfItsAnswer() = runTest {
+        val q = queue().apply { add("rec-log") }
+        val lines = mutableListOf<String>()
+        val secret = "words the server transcribed"
+        UploadPass(q, answering(202, """{"id":"job-9","status":"queued","keep_audio":true,"text":"$secret"}"""), log = { lines += it })
+            .run(setOf(server), server, clients)
+        assertEquals(
+            listOf(
+                "POST /v1/jobs Idempotency-Key rec-log",
+                "POST answer for rec-log: HTTP 202",
+                "read-back of job-9 for rec-log: unreachable (no read-back in this test)",
+            ),
+            lines,
+        )
+        assertTrue(lines.none { secret in it || "ak_test" in it })
+    }
+
+    @Test
     fun aServerErrorGoesBackToPendingWithItsWait() = runTest {
         val q = queue().apply { add("rec-2") }
         UploadPass(q, answering(503, """{"error":"busy"}""", Headers.headersOf("Retry-After", "30"))).run(setOf(server), server, clients)
