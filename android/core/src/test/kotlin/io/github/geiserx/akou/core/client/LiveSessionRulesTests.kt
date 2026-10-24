@@ -146,6 +146,38 @@ class LiveSessionRulesTests {
     }
 
     /**
+     * A connect that fails slowly: the pages queued while it was connecting never reached a server,
+     * so the next session must not replay them. Its first page is a fresh one, and the one Gap runs
+     * from the last audio a server received (none) to it, covering the Paused wait.
+     */
+    @Test
+    fun testAFailedConnectDropsItsQueueSoTheGapCoversTheWholeHole() = runTest {
+        val socket = FakeSocket()
+        var calls = 0
+        val session = session {
+            calls += 1
+            if (calls == 1) {
+                kotlinx.coroutines.delay(500)
+                throw LiveClient.Failure.Handshake(null)
+            }
+            socket
+        }
+        val log = EventLog(session.events, backgroundScope)
+        session.start()
+        // Page i is handed in at (i + 1) * 200 ms: 0 and 1 while connecting, 2 to 6 while paused
+        // (the first attempt fails at 500 ms, the reopen is at 1.5 s), 7 once live.
+        for (i in 0 until 8) {
+            advanceTimeBy(200)
+            session.send(page(i), end(i))
+        }
+        runCurrent()
+        assertEquals(listOf(State.Connecting, State.Paused("network"), State.Connecting, State.Live("fake")), log.states)
+        assertEquals(listOf(7), socket.sent.map { it[0].toInt() }, "no page queued during the failed connect goes out")
+        assertEquals(listOf(LiveSession.Event.Gap(0.0, end(6))), log.gaps, "one gap from 0 to the first fresh page")
+        session.cancel()
+    }
+
+    /**
      * The port rule: OkHttp's `send` never waits, so the session hands it one page and keeps the
      * rest until `queueSize()` is 0. A page that arrives with 25 queued drops the session with
      * `behind`, and the queue is thrown away, never flushed into the socket.

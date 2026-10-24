@@ -256,6 +256,9 @@ class LiveSession internal constructor(
             throw e
         } catch (e: Exception) {
             if (gen != generation) return
+            // Pages queued while this attempt was connecting never reached a server: the next session
+            // starts from fresh pages, so its first page reports the whole hole as a Gap.
+            queue.clear()
             val reason = reason(e)
             if (reason in RETRYABLE) retry(reason) else end(reason)
             return
