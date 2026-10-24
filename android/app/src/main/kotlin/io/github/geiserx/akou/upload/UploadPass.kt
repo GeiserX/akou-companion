@@ -16,6 +16,8 @@ import java.util.UUID
 class UploadPass(
     private val queue: UploadQueue,
     private val transport: UploadQueue.Transport = UploadQueue.OkHttpTransport(),
+    /** One line per request sent, with the Idempotency-Key it carried, so a run on a phone shows each attempt. */
+    private val log: (String) -> Unit = {},
 ) {
     /**
      * One pass over the queue, or over the one recording [only] names. [clients] holds a client for
@@ -33,7 +35,11 @@ class UploadPass(
                 if (client == null || !audio.isFile) {
                     queue.uploadCouldNotStart(item.recordingId, if (client == null) "no server for this recording" else "the recording's file is missing")
                 } else {
-                    queue.uploadEnded(item.recordingId, send { client.submitRequest(item.submission, audio) })
+                    val answer = send {
+                        client.submitRequest(item.submission, audio).also { log("POST ${it.url.encodedPath} Idempotency-Key ${it.header("Idempotency-Key")}") }
+                    }
+                    log("POST answer for ${item.recordingId}: ${describe(answer)}")
+                    queue.uploadEnded(item.recordingId, answer)
                 }
                 claimed.removeFirst()
             }
@@ -47,7 +53,9 @@ class UploadPass(
         // read-back leaves the item submitted and due, so the next run reads it again.
         for (due in queue.dueForConfirm(routing, only)) {
             val client = due.serverId?.let(clients::get) ?: continue
-            queue.confirmEnded(due.recordingId, send { client.jobRequest(due.jobId) })
+            val answer = send { client.jobRequest(due.jobId) }
+            log("read-back of ${due.jobId} for ${due.recordingId}: ${describe(answer)}")
+            queue.confirmEnded(due.recordingId, answer)
         }
     }
 
@@ -58,6 +66,12 @@ class UploadPass(
         throw e
     } catch (e: Exception) {
         UploadQueue.Answer.Unreachable(e.message ?: e.javaClass.simpleName)
+    }
+
+    /** The status, never the body: a job's body can hold transcript text. */
+    private fun describe(a: UploadQueue.Answer): String = when (a) {
+        is UploadQueue.Answer.Http -> "HTTP ${a.status}"
+        is UploadQueue.Answer.Unreachable -> "unreachable (${a.why})"
     }
 
     private companion object {

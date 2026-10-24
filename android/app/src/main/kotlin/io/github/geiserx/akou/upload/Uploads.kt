@@ -159,7 +159,7 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             }
         }
         try {
-            UploadPass(uploads.queue).run(book.servers.map { it.id }.toSet(), book.recordTo, clients, only = id)
+            UploadPass(uploads.queue, log = { Log.i(TAG, it) }).run(book.servers.map { it.id }.toSet(), book.recordTo, clients, only = id)
         } finally {
             uploads.refresh()
         }
