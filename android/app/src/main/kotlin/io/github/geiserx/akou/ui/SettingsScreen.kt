@@ -11,15 +11,18 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -28,7 +31,10 @@ import androidx.compose.ui.unit.dp
 import io.github.geiserx.akou.core.client.ServerProbe
 import io.github.geiserx.akou.settings.ServerForm
 import io.github.geiserx.akou.settings.Settings
+import io.github.geiserx.akou.upload.Uploads
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /** One server: its URL, its key and a Test (A5 brings several). */
@@ -43,6 +49,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     var savedKey by remember { mutableStateOf<String?>(null) }
     var result by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
+    val keepLocalCopy by settings.keepLocalCopy.collectAsState(initial = false)
 
     LaunchedEffect(Unit) {
         val entry = settings.book().servers.firstOrNull()
@@ -68,6 +75,8 @@ fun SettingsScreen(onBack: () -> Unit) {
             savedKey = key.trim().ifEmpty { null }
         }
         if (saved.entry.tested == null) result = null
+        // A new URL or key: parked uploads get another try, and waiting ones may have a server now.
+        withContext(Dispatchers.IO) { Uploads.get(context).settingsChanged() }
         return true
     }
 
@@ -121,5 +130,13 @@ fun SettingsScreen(onBack: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Test") }
         result?.let { Text(it) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("Keep a copy on this phone")
+            Switch(checked = keepLocalCopy, onCheckedChange = { keep -> scope.launch { settings.setKeepLocalCopy(keep) } })
+        }
+        Text(
+            "Off: a recording is deleted from the phone once the server confirms it keeps the audio.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
+        )
     }
 }

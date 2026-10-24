@@ -28,6 +28,7 @@ androidx-test-services-storage = { module = "androidx.test.services:storage", ve
 androidx-test-services = { module = "androidx.test.services:test-services", version.ref = "androidx-test-services" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinx-coroutines" }
 work-runtime = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
+work-testing = { module = "androidx.work:work-testing", version.ref = "work" }
 datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity-compose" }
 

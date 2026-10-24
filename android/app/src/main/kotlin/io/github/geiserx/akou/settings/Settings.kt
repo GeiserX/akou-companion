@@ -4,6 +4,7 @@ package io.github.geiserx.akou.settings
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -33,6 +34,18 @@ class Settings(context: Context, val keys: SecretStore = KeystoreSecretStore(Fil
         store.edit { it[BOOK] = book.encoded() }
     }
 
+    /**
+     * Keep a copy of each recording on the phone after the server has it. Off by default, as on iOS
+     * (SettingsView.swift:15): the copy is deleted once the server confirms it keeps the audio.
+     */
+    val keepLocalCopy: Flow<Boolean> = store.data.map { prefs -> prefs[KEEP_LOCAL_COPY] ?: false }
+
+    suspend fun keepLocalCopy(): Boolean = keepLocalCopy.first()
+
+    suspend fun setKeepLocalCopy(keep: Boolean) {
+        store.edit { it[KEEP_LOCAL_COPY] = keep }
+    }
+
     fun key(server: UUID): String? = keys.load(server.toString())
 
     /** "Record to" with its URL and key, or null when either is missing. */
@@ -45,5 +58,6 @@ class Settings(context: Context, val keys: SecretStore = KeystoreSecretStore(Fil
 
     private companion object {
         val BOOK = stringPreferencesKey("server_book")
+        val KEEP_LOCAL_COPY = booleanPreferencesKey("keep_local_copy")
     }
 }

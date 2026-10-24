@@ -16,14 +16,19 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import io.github.geiserx.akou.recorder.RecordingService
 import io.github.geiserx.akou.ui.RecordScreen
 import io.github.geiserx.akou.ui.SettingsScreen
+import io.github.geiserx.akou.upload.Uploads
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
 
 /** The Record screen and the server settings, dark by default. */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        startUpOnce()
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -33,5 +38,21 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Once per process, off the main thread: recordings a killed recorder left are repaired and
+     * queued, and every waiting upload gets its work (opening the queue requeues uploads a dead
+     * process had claimed).
+     */
+    private fun startUpOnce() {
+        if (!startedUp.compareAndSet(false, true)) return
+        val app = applicationContext
+        val recorder = RecordingService.recorder(app)
+        thread(name = "akou-start-up") { Uploads.get(app).startUp { recorder.fileInUse } }
+    }
+
+    private companion object {
+        val startedUp = AtomicBoolean(false)
     }
 }
