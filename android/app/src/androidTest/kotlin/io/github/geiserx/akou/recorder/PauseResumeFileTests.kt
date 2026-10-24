@@ -48,8 +48,10 @@ class PauseResumeFileTests {
         withContext(Dispatchers.Main) { recorder.start(null, null) }
         Thread.sleep(2_000)
         withContext(Dispatchers.Main) { recorder.pause() }
+        // The read in flight returns, with audio from before the pause, once the microphone stops.
+        Thread.sleep(SETTLE_MS)
         val atPause = recorder.deliveredSamples
-        Thread.sleep(1_500)
+        Thread.sleep(1_500 - SETTLE_MS)
         val duringPause = recorder.deliveredSamples - atPause
         Log.i(TAG, "delivered before the pause ${atPause / 16000.0} s of 2 s")
         assertTrue(withContext(Dispatchers.Main) { recorder.resume() })
@@ -102,5 +104,6 @@ class PauseResumeFileTests {
     private companion object {
         const val TAG = "PauseResumeFileTests"
         const val STREAM_NAME = "paused-recording.opus"
+        const val SETTLE_MS = 300L
     }
 }

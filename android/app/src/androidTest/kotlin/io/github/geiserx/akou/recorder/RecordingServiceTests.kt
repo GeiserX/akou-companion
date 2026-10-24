@@ -78,8 +78,10 @@ class RecordingServiceTests {
         await("paused") { recorder.state.value is Recorder.State.Paused }
         n = awaitNotification(listOf("Resume", "Stop"))
         assertFalse(n.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER), "the chronometer stops while paused")
+        // The read in flight returns, with audio from before the pause, once the microphone stops.
+        Thread.sleep(300)
         val atPause = recorder.deliveredSamples
-        Thread.sleep(1_500)
+        Thread.sleep(1_200)
         assertEquals(atPause, recorder.deliveredSamples, "nothing is captured while paused")
 
         // Resume: the chronometer's base moves on by the paused time.
