@@ -177,7 +177,11 @@ class UploadQueue(
             }
             if (decoded == null) {
                 unreadable = true
-                store.setAside()
+                // Kept for a look later; if it cannot be moved, the next save replaces it anyway.
+                try {
+                    store.setAside()
+                } catch (_: IOException) {
+                }
             } else {
                 for (item in decoded) byId.putIfAbsent(item.recordingId, item)
             }
