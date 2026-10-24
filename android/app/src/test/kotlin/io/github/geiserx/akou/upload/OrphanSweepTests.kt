@@ -48,6 +48,22 @@ class OrphanSweepTests {
     }
 
     @Test
+    fun aTornQueueFileLosesNoRecordingTheSweepQueuesItAgainUnderItsOwnId() {
+        val id = "33333333-3333-3333-3333-333333333333"
+        val (f, _) = killedRecording("$id.opus", pages = 2)
+        OggRepair.repair(f)
+        queue().enqueue(JobsClient.Submission(recordingId = id, language = "auto"), f.name)
+        val qf = File(tmp.root, "queue.json")
+        qf.writeBytes(qf.readBytes().copyOf(qf.length().toInt() - 3))
+
+        val q = queue() // the app's next start: no crash, an empty queue
+        assertTrue(q.startedFromUnreadableStore)
+        val outcome = OrphanSweep(q) { null }.run()[f.name]
+        assertEquals(OrphanSweep.Outcome.Queued(OggRepair.Result.Intact), outcome)
+        assertEquals(UploadQueue.State.Pending, q.item(id)?.state) // same id, so the same Idempotency-Key
+    }
+
+    @Test
     fun aFileCutMidPageIsRepairedToAWholeStreamAndQueued() {
         val (f, whole) = killedRecording("11111111-1111-1111-1111-111111111111.opus", pages = 5)
         val lastWhole = whole.size
@@ -63,11 +79,13 @@ class OrphanSweepTests {
         assertEquals(7, pages.size)
         assertTrue(OggPage.Flags.END_OF_STREAM in pages.last().flags)
         assertTrue(pages.dropLast(1).none { OggPage.Flags.END_OF_STREAM in it.flags })
-        assertEquals(5 * 10 * 960L, pages.last().granulePosition)
-        // Only the flag and the CRC of the last page changed.
+        // The end page carries the pre-skip, as the writer's own last page does.
+        assertEquals(312 + 5 * 10 * 960L, pages.last().granulePosition)
+        // Only the flag, the granule and the CRC of the last page changed.
         val bytes = f.readBytes()
         val diff = whole.indices.filter { whole[it] != bytes[it] }
-        assertTrue(diff.all { it == lastPageStart(whole) + 5 || it in lastPageStart(whole) + 22 until lastPageStart(whole) + 26 }, "$diff")
+        val last = lastPageStart(whole)
+        assertTrue(diff.all { it == last + 5 || it in last + 6 until last + 14 || it in last + 22 until last + 26 }, "$diff")
 
         val item = q.item("11111111-1111-1111-1111-111111111111")!!
         assertEquals(f.name, item.fileName)
@@ -75,7 +93,22 @@ class OrphanSweepTests {
         assertNull(item.serverId) // "Record to" at the first pass
         assertEquals(item.recordingId, item.submission.recordingId) // the Idempotency-Key
 
-        ffprobeSeconds(f)?.let { s -> assertTrue(abs(s - 1.0) < 0.02, "ffprobe reads $s s for 50 frames") }
+        // Read as an intact 1.0 s file reads: 1.0065 s with the pre-skip, 1.0 s without it.
+        ffprobeSeconds(f)?.let { s -> assertTrue(abs(s - 1.0) < 0.001, "ffprobe reads $s s for 50 frames") }
+    }
+
+    @Test
+    fun anOpusHeadTooShortForItsPreSkipIsNotARecordingAndIsLeftAlone() {
+        val serial = 7u
+        val pages = listOf(
+            OggPage(OggPage.Flags.BEGIN_OF_STREAM, 0, serial, 0u, listOf("OpusHead".toByteArray() + byteArrayOf(1))),
+            OggPage(granulePosition = 0, serial = serial, sequence = 1u, packets = listOf("OpusTags".toByteArray())),
+            OggPage(granulePosition = 9600, serial = serial, sequence = 2u, packets = List(10) { byteArrayOf(0x08) }),
+        )
+        val bytes = pages.fold(ByteArray(0)) { acc, p -> acc + p.encoded() }
+        val f = File(dir, "55555555-5555-5555-5555-555555555555.opus").apply { writeBytes(bytes) }
+        assertEquals(OggRepair.Result.NotARecording, OggRepair.repair(f))
+        assertContentEquals(bytes, f.readBytes())
     }
 
     @Test

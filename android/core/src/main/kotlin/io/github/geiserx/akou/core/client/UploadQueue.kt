@@ -16,6 +16,7 @@ import okhttp3.Headers
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -59,17 +60,33 @@ class UploadQueue(
 
         /** Replaces the blob; a crash mid-write leaves the old one or the new one, never a mix. */
         fun write(bytes: ByteArray)
+
+        /** The blob could not be read as a queue: keep it out of the way (for a look later), so the next write starts clean. */
+        fun setAside() {}
     }
 
-    /** A [Store] in one file, replaced atomically through a temporary file beside it. */
+    /**
+     * A [Store] in one file, replaced atomically through a temporary file beside it. The temporary
+     * file is synced before the rename, so a power loss leaves the old file or the new one, never
+     * an empty or a short one.
+     */
     class FileStore(private val file: File) : Store {
         override fun read(): ByteArray? = if (file.isFile) file.readBytes() else null
 
         override fun write(bytes: ByteArray) {
             file.parentFile?.mkdirs()
             val tmp = File(file.parentFile, "${file.name}.tmp")
-            tmp.writeBytes(bytes)
+            FileOutputStream(tmp).use { out ->
+                out.write(bytes)
+                out.fd.sync()
+            }
             Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        }
+
+        /** Renames the file to `<name>.bad`, replacing an older one. */
+        override fun setAside() {
+            if (!file.isFile) return
+            Files.move(file.toPath(), File(file.parentFile, "${file.name}.bad").toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
     }
 
@@ -144,10 +161,30 @@ class UploadQueue(
     private val lock = Any()
     private val byId = LinkedHashMap<String, Item>()
 
+    /** True when the store held a blob that could not be read or was not a queue: it was set aside and the queue started empty. */
+    val startedFromUnreadableStore: Boolean
+
     init {
-        store.read()?.let { bytes ->
-            for (item in AkouJson.decodeFromString(ITEMS, bytes.decodeToString())) byId.putIfAbsent(item.recordingId, item)
+        // A torn, corrupt or unreadable file must not stop the app at every start. The recordings
+        // stay on disk, so the start-up sweep queues them again under the same ids, and a recording
+        // that comes back after it was sent goes up with the same Idempotency-Key.
+        val decoded = try {
+            store.read()?.let { AkouJson.decodeFromString(ITEMS, it.decodeToString()) } ?: emptyList()
+        } catch (_: IllegalArgumentException) { // SerializationException is one
+            null
+        } catch (_: IOException) {
+            null
         }
+        if (decoded == null) {
+            // Kept for a look later, bytes and all; if it cannot be moved, the next save replaces it.
+            try {
+                store.setAside()
+            } catch (_: IOException) {
+            }
+        } else {
+            for (item in decoded) byId.putIfAbsent(item.recordingId, item)
+        }
+        startedFromUnreadableStore = decoded == null
     }
 
     // Reading
@@ -320,6 +357,11 @@ class UploadQueue(
             is Answer.Unreachable -> retryLater(item, null, answer.why)
         }
         save()
+    }
+
+    /** Forgets [recordingId]'s item; its file, if any, stays where it is. */
+    fun remove(recordingId: String): Unit = synchronized(lock) {
+        if (byId.remove(recordingId) != null) save()
     }
 
     /**

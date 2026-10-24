@@ -9,7 +9,9 @@ import java.io.RandomAccessFile
 /**
  * Makes a recording whose writer died (the process was killed mid-recording) a whole Ogg Opus
  * stream again: the torn page at the end is cut off, and the last whole page gets the
- * end-of-stream flag, with its CRC recomputed. Nothing else in the file changes.
+ * end-of-stream flag and the pre-skip in its granule, as the writer's own last page carries
+ * (audio pages count packets x 960 with no pre-skip, the end page preSkip + packets x 960), with
+ * its CRC recomputed. Nothing else in the file changes.
  */
 object OggRepair {
     sealed interface Result {
@@ -27,6 +29,8 @@ object OggRepair {
     }
 
     private const val FLAGS_OFFSET = 5
+    private const val GRANULE_OFFSET = 6
+    private const val PRE_SKIP_OFFSET = 10 // in OpusHead, RFC 7845 section 5.1
     private const val CRC_OFFSET = 22
     private val CAPTURE = "OggS".toByteArray(Charsets.US_ASCII)
     private val OPUS_HEAD = "OpusHead".toByteArray(Charsets.US_ASCII)
@@ -50,7 +54,7 @@ object OggRepair {
             end += read.length
         }
         val head = pages.firstOrNull()?.packets?.singleOrNull()
-        if (head == null || !head.startsWith(OPUS_HEAD)) {
+        if (head == null || !head.startsWith(OPUS_HEAD) || head.size < PRE_SKIP_OFFSET + 2) {
             // The writer puts OpusHead first, at once; an empty file or a torn first page is ours, cut short.
             val tornStart = data.size < CAPTURE.size && CAPTURE.copyOf(data.size).contentEquals(data)
             return if (pages.isEmpty() && (tornStart || data.startsWith(CAPTURE))) Result.NoAudio else Result.NotARecording
@@ -67,6 +71,12 @@ object OggRepair {
             if (markEnd) {
                 val page = data.copyOfRange(lastStart, end)
                 page[FLAGS_OFFSET] = (page[FLAGS_OFFSET].toInt() or OggPage.Flags.END_OF_STREAM.bits).toByte()
+                val granule = pages.last().granulePosition
+                if (granule >= 0) {
+                    val preSkip = (head[PRE_SKIP_OFFSET].toInt() and 0xFF) or ((head[PRE_SKIP_OFFSET + 1].toInt() and 0xFF) shl 8)
+                    val ended = granule + preSkip
+                    for (i in 0 until 8) page[GRANULE_OFFSET + i] = (ended ushr (8 * i)).toByte()
+                }
                 for (i in CRC_OFFSET until CRC_OFFSET + 4) page[i] = 0
                 val crc = OggCRC.checksum(page).toInt()
                 for (i in 0 until 4) page[CRC_OFFSET + i] = (crc ushr (8 * i)).toByte()
