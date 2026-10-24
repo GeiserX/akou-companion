@@ -161,32 +161,30 @@ class UploadQueue(
     private val lock = Any()
     private val byId = LinkedHashMap<String, Item>()
 
-    /** True when the store held a blob that was not a queue: it was set aside and the queue started empty. */
+    /** True when the store held a blob that could not be read or was not a queue: it was set aside and the queue started empty. */
     val startedFromUnreadableStore: Boolean
 
     init {
-        var unreadable = false
-        store.read()?.let { bytes ->
-            // A torn or corrupt file must not stop the app at every start. The recordings stay on
-            // disk, so the start-up sweep queues them again under the same ids, and a recording that
-            // comes back after it was sent goes up with the same Idempotency-Key.
-            val decoded = try {
-                AkouJson.decodeFromString(ITEMS, bytes.decodeToString())
-            } catch (_: IllegalArgumentException) { // SerializationException is one
-                null
-            }
-            if (decoded == null) {
-                unreadable = true
-                // Kept for a look later; if it cannot be moved, the next save replaces it anyway.
-                try {
-                    store.setAside()
-                } catch (_: IOException) {
-                }
-            } else {
-                for (item in decoded) byId.putIfAbsent(item.recordingId, item)
-            }
+        // A torn, corrupt or unreadable file must not stop the app at every start. The recordings
+        // stay on disk, so the start-up sweep queues them again under the same ids, and a recording
+        // that comes back after it was sent goes up with the same Idempotency-Key.
+        val decoded = try {
+            store.read()?.let { AkouJson.decodeFromString(ITEMS, it.decodeToString()) } ?: emptyList()
+        } catch (_: IllegalArgumentException) { // SerializationException is one
+            null
+        } catch (_: IOException) {
+            null
         }
-        startedFromUnreadableStore = unreadable
+        if (decoded == null) {
+            // Kept for a look later, bytes and all; if it cannot be moved, the next save replaces it.
+            try {
+                store.setAside()
+            } catch (_: IOException) {
+            }
+        } else {
+            for (item in decoded) byId.putIfAbsent(item.recordingId, item)
+        }
+        startedFromUnreadableStore = decoded == null
     }
 
     // Reading

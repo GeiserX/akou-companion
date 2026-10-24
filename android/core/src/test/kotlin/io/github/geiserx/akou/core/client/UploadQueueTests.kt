@@ -87,6 +87,22 @@ class UploadQueueTests {
     }
 
     @Test
+    fun aStoreThatCannotBeReadStartsAnEmptyQueueInsteadOfFailing() {
+        var setAside = 0
+        val store = object : UploadQueue.Store {
+            override fun read(): ByteArray = throw java.io.IOException("I/O error")
+            override fun write(bytes: ByteArray) {}
+            override fun setAside() {
+                setAside += 1
+            }
+        }
+        val queue = UploadQueue(store = store, audioDirectory = audioDir, now = { clock.now }, keepLocalCopy = { keepLocalCopy })
+        assertTrue(queue.startedFromUnreadableStore)
+        assertEquals(emptyList(), queue.items)
+        assertEquals(1, setAside)
+    }
+
+    @Test
     fun aRemovedItemIsGoneAfterARestartAndItsFileStays() {
         val queue = makeQueue()
         val file = record(queue, "rec-r")

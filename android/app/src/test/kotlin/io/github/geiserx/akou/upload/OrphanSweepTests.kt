@@ -98,6 +98,20 @@ class OrphanSweepTests {
     }
 
     @Test
+    fun anOpusHeadTooShortForItsPreSkipIsNotARecordingAndIsLeftAlone() {
+        val serial = 7u
+        val pages = listOf(
+            OggPage(OggPage.Flags.BEGIN_OF_STREAM, 0, serial, 0u, listOf("OpusHead".toByteArray() + byteArrayOf(1))),
+            OggPage(granulePosition = 0, serial = serial, sequence = 1u, packets = listOf("OpusTags".toByteArray())),
+            OggPage(granulePosition = 9600, serial = serial, sequence = 2u, packets = List(10) { byteArrayOf(0x08) }),
+        )
+        val bytes = pages.fold(ByteArray(0)) { acc, p -> acc + p.encoded() }
+        val f = File(dir, "55555555-5555-5555-5555-555555555555.opus").apply { writeBytes(bytes) }
+        assertEquals(OggRepair.Result.NotARecording, OggRepair.repair(f))
+        assertContentEquals(bytes, f.readBytes())
+    }
+
+    @Test
     fun aFileCutOnAPageBoundaryOnlyGetsItsEnd() {
         val (f, _) = killedRecording("22222222-2222-2222-2222-222222222222.opus", pages = 2)
         val out = OrphanSweep(queue()) { null }.run()[f.name]

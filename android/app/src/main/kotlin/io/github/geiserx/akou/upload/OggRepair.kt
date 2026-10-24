@@ -54,7 +54,7 @@ object OggRepair {
             end += read.length
         }
         val head = pages.firstOrNull()?.packets?.singleOrNull()
-        if (head == null || !head.startsWith(OPUS_HEAD)) {
+        if (head == null || !head.startsWith(OPUS_HEAD) || head.size < PRE_SKIP_OFFSET + 2) {
             // The writer puts OpusHead first, at once; an empty file or a torn first page is ours, cut short.
             val tornStart = data.size < CAPTURE.size && CAPTURE.copyOf(data.size).contentEquals(data)
             return if (pages.isEmpty() && (tornStart || data.startsWith(CAPTURE))) Result.NoAudio else Result.NotARecording
