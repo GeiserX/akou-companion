@@ -306,4 +306,18 @@ class UploadQueueTests {
             makeQueue().items.map { it.state },
         )
     }
+    /** Not in the Swift test: a transport with one piece of work per recording claims and reads back that one alone. */
+    @Test
+    fun testOnlyClaimsAndConfirmsTheOneRecordingAsked() {
+        val queue = makeQueue()
+        record(queue, "a")
+        record(queue, "b")
+        assertEquals(listOf("a"), queue.claimDue(only = "a").map { it.recordingId })
+        assertEquals(UploadQueue.State.Pending, queue.item("b")?.state)
+        queue.uploadEnded("a", job("ja"))
+        assertEquals(listOf("b"), queue.claimDue(only = "b").map { it.recordingId })
+        queue.uploadEnded("b", job("jb"))
+        assertEquals(listOf("jb"), queue.dueForConfirm(only = "b").map { it.jobId })
+        assertEquals(2, queue.dueForConfirm().size)
+    }
 }

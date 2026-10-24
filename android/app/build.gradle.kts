@@ -65,6 +65,8 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.services.storage)
     androidTestImplementation(libs.kotlin.test.junit)
+    androidTestImplementation(libs.work.testing)
+    androidTestImplementation(libs.okhttp.mockwebserver)
     androidTestUtil(libs.androidx.test.services)
 }
 

@@ -75,6 +75,14 @@ class RecordingService : Service() {
         watch?.cancel()
         watch = null
         if (service === this) service = null
+        // Destroyed with a recording still running (the system stopped the service, not the
+        // process): finish the file and queue it. A killed process runs nothing; the start-up
+        // sweep queues its file instead.
+        if (!recorder(this).isIdle) {
+            Log.w(TAG, "destroyed while recording; stopping the recording")
+            commands(this).stop()
+            service = null
+        }
         super.onDestroy()
     }
 

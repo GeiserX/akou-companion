@@ -180,13 +180,15 @@ class UploadQueue(
      *
      * With [routing], each item gets its server first: its own, else "Record to", written into the
      * item. An item with no server to go to waits; one whose server is gone is parked. Without
-     * [routing] (one server) every due item is claimed as it is.
+     * [routing] (one server) every due item is claimed as it is. With [only], that one recording
+     * alone is looked at, for a transport that runs one piece of work per recording.
      */
-    fun claimDue(routing: Routing? = null): List<Item> = synchronized(lock) {
+    fun claimDue(routing: Routing? = null, only: String? = null): List<Item> = synchronized(lock) {
         val t = now()
         val claimed = mutableListOf<Item>()
         var changed = routing?.let(::stampLegacy) ?: false
         for ((id, item) in byId.entries.toList()) {
+            if (only != null && id != only) continue
             if (item.state != State.Pending || !isDue(item, t)) continue
             var next = item
             if (routing != null) {
@@ -259,13 +261,14 @@ class UploadQueue(
      * The submitted items whose time has come: the caller reads each job back with
      * `GET /v1/jobs/{id}` on [Confirm.serverId], the server it was uploaded to, and reports with
      * [confirmEnded]. With [routing], an item whose server was removed is parked instead (its file
-     * is still on the phone, so [reassign] can send it elsewhere).
+     * is still on the phone, so [reassign] can send it elsewhere). With [only], that one recording alone.
      */
-    fun dueForConfirm(routing: Routing? = null): List<Confirm> = synchronized(lock) {
+    fun dueForConfirm(routing: Routing? = null, only: String? = null): List<Confirm> = synchronized(lock) {
         val t = now()
         val out = mutableListOf<Confirm>()
         var changed = routing?.let(::stampLegacy) ?: false
         for ((id, item) in byId.entries.toList()) {
+            if (only != null && id != only) continue
             val state = item.state as? State.Submitted ?: continue
             if (!isDue(item, t)) continue
             // The server it was uploaded to, never "Record to" as it is now.

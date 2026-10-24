@@ -129,6 +129,15 @@ class Recorder(
     private var current: Current? = null
 
     /**
+     * The file this recorder writes, or is about to: named before the file is created and let go
+     * only after [onFinished] has queued it, so the start-up sweep never takes it for an orphan.
+     * Read from any thread.
+     */
+    @Volatile
+    var fileInUse: File? = null
+        private set
+
+    /**
      * The current pause came from the system (a phone call, the Assistant, a lost microphone), so
      * its end may resume the recording. A pause the user asked for never resumes by itself.
      */
@@ -147,13 +156,23 @@ class Recorder(
         if (_state.value != State.Idle || current != null) throw Failure.AlreadyRecording()
 
         val id = newId()
-        val output = makeOutput(File(directory, "$id.opus"))
-        val source = makeSource { samples -> output.append(samples) }
+        val file = File(directory, "$id.opus")
+        fileInUse = file
+        val output: RecordingOutput
+        val source: SampleSource
         try {
+            output = makeOutput(file)
+        } catch (e: Exception) {
+            fileInUse = null
+            throw e
+        }
+        try {
+            source = makeSource { samples -> output.append(samples) }
             source.start()
         } catch (e: Exception) {
             output.finish()
             output.file.delete()
+            fileInUse = null
             throw e
         }
 
@@ -250,6 +269,8 @@ class Recorder(
             withContext(NonCancellable) { runCatching { rec.output.finish() } }
             rec.listener?.cancel()
             current = null
+            // Not queued: the start-up sweep finds the file and queues it.
+            fileInUse = null
             _lastError.value = "Stopping failed: ${e.message ?: e.javaClass.simpleName}"
             _state.value = State.Idle
             throw e
@@ -264,7 +285,11 @@ class Recorder(
             serverId = rec.serverId,
         )
         _state.value = State.Idle
-        onFinished(finished)
+        try {
+            onFinished(finished)
+        } finally {
+            fileInUse = null
+        }
         return finished
     }
 
