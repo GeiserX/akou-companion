@@ -18,10 +18,11 @@ android {
         versionCode = 1
         versionName = "0.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        // The real-server test and the phone-call test run only by hand (`am instrument -e class ...`
-        // with their arguments). Skipped through an assumption, AGP writes them into the results as failures.
-        testInstrumentationRunnerArguments["notClass"] =
-            "io.github.geiserx.akou.EndToEndTests,io.github.geiserx.akou.recorder.CallInterruptionTests"
+        // The real-server test runs only by hand (`am instrument -e class ...EndToEndTests` with its
+        // arguments). Skipped through an assumption, AGP writes it into the results as a failure.
+        testInstrumentationRunnerArguments["notClass"] = "io.github.geiserx.akou.EndToEndTests"
+        // So does the phone-call test, whose host places the call.
+        testInstrumentationRunnerArguments["notAnnotation"] = "io.github.geiserx.akou.recorder.ByHand"
         // The pause test hands its file to the host through TestStorage for ffprobe.
         testInstrumentationRunnerArguments["useTestStorageService"] = "true"
     }

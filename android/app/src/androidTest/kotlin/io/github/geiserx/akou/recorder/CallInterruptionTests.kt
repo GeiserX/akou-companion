@@ -25,6 +25,7 @@ import kotlin.test.fail
  * pick up, so the test answers the ringing call itself through Telecom (with the shell's permission),
  * then waits for the system pause, for the hang-up (`gsm cancel <n>`) and the resume.
  */
+@ByHand
 @RunWith(AndroidJUnit4::class)
 class CallInterruptionTests {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
