@@ -63,7 +63,10 @@ class RecordingService : Service() {
                 }
             }
             ACTION_STOP -> scope.launch {
-                if (recorder(this@RecordingService).stop() == null) stopSelf()
+                // A second Stop can land while the first is still finishing the file and live text:
+                // only an idle recorder lets this one end the service; otherwise finished() does.
+                val r = recorder(this@RecordingService)
+                if (r.stop() == null && r.isIdle) stopSelf()
             }
             // Restarted by the system with no intent: nothing is recording in this new process.
             else -> stopSelf()

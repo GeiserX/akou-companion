@@ -75,6 +75,12 @@ class Recorder(
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
 
+    /**
+     * Nothing is recording or stopping. A Stop that finds the recorder busy stopping must leave the
+     * service up: the stop under way ends it through [onFinished].
+     */
+    val isIdle: Boolean get() = _state.value == State.Idle && current == null
+
     private val _transcript = MutableStateFlow(TranscriptSnapshot())
     val transcript: StateFlow<TranscriptSnapshot> = _transcript.asStateFlow()
 
