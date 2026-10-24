@@ -53,6 +53,7 @@ class PauseResumeFileTests {
         val duringPause = recorder.deliveredSamples - atPause
         Log.i(TAG, "delivered before the pause ${atPause / 16000.0} s of 2 s")
         assertTrue(withContext(Dispatchers.Main) { recorder.resume() })
+        val atResume = recorder.deliveredSamples
         Thread.sleep(2_000)
         // The recorded time as the chronometer shows it: now minus the base shifted by the pause.
         val (finished, chronometer) = withContext(Dispatchers.Main) {
@@ -64,6 +65,9 @@ class PauseResumeFileTests {
         scope.cancel()
 
         assertEquals(0L, duringPause, "nothing is captured while paused")
+        // And the microphone comes back: at least half of the 2 s after the resume (the emulator's
+        // microphone runs slow on a loaded host).
+        assertTrue(f.deliveredSamples - atResume >= 16_000, "${f.deliveredSamples - atResume} samples after the resume")
         val bytes = f.file.readBytes()
         val pages = OggPage.readAll(bytes)
         assertEquals(OggPage.Flags.BEGIN_OF_STREAM, pages.first().flags)
